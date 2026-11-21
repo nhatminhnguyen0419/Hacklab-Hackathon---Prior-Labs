@@ -165,7 +165,7 @@ async def sim_socket(ws: WebSocket):
 
 async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
     env.goal_predictor = traj["predict"]
-    obs, _ = env.reset(seed=int(time.time()), options={"live": True})
+    obs, _ = env.reset(seed=time.time_ns() % 2**31, options={"live": True})  # ns: two episodes in one second differ
     marker = env.m.site("goal_pred").id
     env.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
     ident = {"name": None}
