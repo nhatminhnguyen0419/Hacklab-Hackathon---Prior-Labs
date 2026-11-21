@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from arm_env import ArmEnv
+from sim.env import FORCE_LIMIT, RELEASE_ACTION, STOP_ACTION, ArmEnv  # the new simulator
 from generate_dataset import EPISODE_COLUMNS, STEP_COLUMNS
 from grasp_outcome import touch_features
 
@@ -137,7 +137,7 @@ async def sim_socket(ws: WebSocket):
     await ws.accept()
     policy_name, policy = load_policy()
     env = ArmEnv()
-    renderer = mujoco.Renderer(env.sim.m, 480, 640)
+    renderer = mujoco.Renderer(env.m, 480, 640)
     cmd = {"voice": "idle", "start": False}
 
     async def receive():
@@ -166,8 +166,8 @@ async def sim_socket(ws: WebSocket):
 async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
     env.goal_predictor = traj["predict"]
     obs, _ = env.reset(seed=int(time.time()), options={"live": True})
-    marker = env.sim.m.site("goal_pred").id
-    env.sim.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
+    marker = env.m.site("goal_pred").id
+    env.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
     ident = {"name": None}
     success, t_success, t_release, max_force = False, None, None, 0.0
 
@@ -188,23 +188,23 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
         voice = cmd["voice"]
         env.manual_voice = "ready" if voice == "release" else voice
         if voice == "stop":
-            action = np.zeros(4)  # safety layer: "stop" freezes every joint, whatever the policy says
+            action = STOP_ACTION  # safety layer: "stop" freezes every joint, whatever the policy says
         elif voice == "release":
-            action = np.array([0, 0, 0, -1.0])  # open the hand, keep the arm still
+            action = RELEASE_ACTION  # open the hand, keep the arm still
             t_release = t_release or k / FPS
         else:
             action = policy(env, obs)
         obs, _, terminated, _, info = env.step(action)
         max_force = max(max_force, env.total_f)
         if env.G_range is not None:
-            env.sim.m.site_pos[marker] = env.G_pred
+            env.m.site_pos[marker] = env.G_pred
         if env.t_touch is not None and not hold["asked"] and grasp["clf"] is not None:
             hold["asked"] = True  # the row is taken now, at first touch; the answer arrives ~0.1 s later
             asyncio.create_task(predict_hold(touch_features(env)))
         if terminated and info["success"] and not success:  # a 1 s hold with the wrist misaligned is not a success
             success, t_success = True, k / FPS
 
-        renderer.update_scene(env.sim.d, camera="demo")
+        renderer.update_scene(env.d, camera="demo")
         buf = io.BytesIO()
         Image.fromarray(renderer.render()).save(buf, format="JPEG", quality=75)
         await ws.send_bytes(buf.getvalue())
@@ -219,13 +219,13 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             "wrist_error_deg": None if math.isnan(env.err_at_touch) else round(math.degrees(env.err_at_touch), 1),
             "time_to_grasp": None if env.t_touch is None or env.t_carrier0 is None
             else round(env.t_touch - env.t_carrier0, 2),
-            "max_force": round(max_force, 1),
+            "max_force": round(max_force, 1), "force_limit": FORCE_LIMIT,
             "hold_p": None if hold["p"] is None else round(hold["p"], 3), "grasp_model": grasp["status"],
             # stop point: TabPFN's guess vs where the object really stops (the simulator knows), and the 10-90% range
             "goal_err_cm": None if env.G_range is None else round(100 * float(np.linalg.norm(env.G_pred - env.G)), 1),
             "goal_range_cm": None if env.G_range is None else round(100 * (env.G_range[1] - env.G_range[0]), 1),
             "arrive_in": None if env.G_range is None or env.t_carrier0 is None
-            else round(max(0.0, env.travel_time - (env.k * env.sim.dt - env.t_carrier0)), 1),
+            else round(max(0.0, env.travel_time - (env.k * env.dt - env.t_carrier0)), 1),
             "traj_model": traj["status"],
         }))
         if t_release is not None and k / FPS - t_release > 1.0:

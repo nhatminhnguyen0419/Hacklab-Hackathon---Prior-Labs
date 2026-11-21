@@ -18,7 +18,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from arm_env import ArmEnv
+from sim.env import ArmEnv  # the new simulator (Kinova Gen3 + Aero Hand); the old one: git history
 
 
 def evaluate(path, episodes, tabpfn_goal=False):

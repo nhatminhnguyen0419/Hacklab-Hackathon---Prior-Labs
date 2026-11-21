@@ -1,0 +1,47 @@
+<!--
+  New scene for the HackLab #2 prosthetic arm (replaces ../scene.xml + ../prosthetic_arm.xml).
+  The arm (Kinova Gen3, 7 joints) and hand (TetherIA Aero Hand Open, tendon-driven) come from
+  MuJoCo Menagerie (sim/menagerie, their own licences) and are attached in code by sim/build.py:
+  the arm hangs from the "shoulder" site, the hand sits on the arm's wrist.
+  Angles in radians (the Menagerie models use radians too).
+-->
+<mujoco model="prosthetic_arm_scene_v2">
+  <compiler angle="radian"/>
+  <include file="objects.xml"/>
+
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" cone="elliptic" impratio="10"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <global azimuth="140" elevation="-20" offwidth="1280" offheight="720"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.2 0.25 0.3" rgb2="0.3 0.35 0.4"/>
+    <material name="grid" texture="grid" texrepeat="8 8" reflectance="0.1"/>
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.4 0.6 0.8" rgb2="0 0 0"
+             width="512" height="512"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1" directional="true"/>
+    <light pos="1.5 -1.5 2.5" dir="-1 1 -1" diffuse="0.4 0.4 0.4"/>
+    <geom name="floor" type="plane" size="3 3 0.05" material="grid" contype="1" conaffinity="1"/>
+
+    <!-- Fixed torso (visual only, no collisions) -->
+    <body name="torso" pos="0 0 1.15">
+      <geom type="box" size="0.10 0.17 0.25" contype="0" conaffinity="0" rgba="0.55 0.6 0.7 0.6"/>
+    </body>
+    <!-- Right shoulder: the arm's base mounts here, its first joint axis pointing down (arm hangs) -->
+    <site name="shoulder" pos="0 -0.22 1.40" quat="0 1 0 0" size="0.01"/>
+
+    <!-- Reach zone: where objects are handed over, at about arm's length (sim/env.py; visual only) -->
+    <site name="reach_zone" type="box" pos="0.42 -0.26 1.18" size="0.08 0.17 0.12" rgba="0.2 1 0.4 0.08"/>
+    <!-- TabPFN's predicted stop point (trajectory.py); parked below the floor until used -->
+    <site name="goal_pred" type="sphere" size="0.022" pos="0 0 -5" rgba="1 0.3 0.75 0.75"/>
+    <!-- Fixed camera for the web app's live image stream -->
+    <camera name="demo" pos="1.15 -1.25 1.55" xyaxes="0.749 0.663 0 -0.211 0.238 0.948"/>
+  </worldbody>
+</mujoco>

@@ -23,7 +23,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from generate_dataset import ARM_JOINTS, OBJECTS
+from generate_dataset import OBJECTS
 
 DATA = "data/grasp_touch.csv"
 FEATURES = ["object", "wrist_err_deg", "grasp_dist", "total_force", "finger_force", "grip_angle",
@@ -34,15 +34,14 @@ LIVE_CONTEXT = 600  # rows kept for live use on CPU (fast checkpoint + cached co
 
 def touch_features(env):
     """Feature row at the first finger touch (what the robot can sense then; no future info)."""
-    sim, d = env.sim, env.sim.d
     rel = env.hand_R.T @ (env.opos - env.hand_pos)
     return [
         OBJECTS.index(env.predicted) if env.predicted in OBJECTS else -1,
         math.degrees(env.err_at_touch) if not math.isnan(env.err_at_touch) else 0.0,
         env.grasp_dist, env.total_f, env.finger_f,
-        float(d.qpos[sim.grip_q]), float(env.ctrl[3]),
+        float(env.d.qpos[env.grip_q]), float(env.grip),
         float(np.linalg.norm(env.ovel)), *rel,
-        float(np.abs([d.qvel[sim.jdof[j]] for j in ARM_JOINTS]).sum()),
+        env.arm_speed,
     ]
 
 
@@ -52,7 +51,7 @@ _worker = {}
 
 def _init():
     from stable_baselines3 import PPO
-    from arm_env import ArmEnv
+    from sim.env import ArmEnv
     _worker["env"] = ArmEnv()
     _worker["rl"] = PPO.load("models/ppo_arm.zip", device="cpu")
 

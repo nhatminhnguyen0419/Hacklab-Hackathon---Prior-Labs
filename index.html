@@ -286,7 +286,7 @@ function showState(s) {
   $("r-wrist").className = "value num " + (s.wrist_error_deg == null ? "" : s.wrist_error_deg <= 15 ? "ok" : "bad");
   $("r-ttg").textContent = s.time_to_grasp == null ? "–" : `${s.time_to_grasp} s`;
   $("r-force").textContent = `${s.max_force} N`;
-  $("r-force").className = "value num " + (s.max_force > 20 ? "warn" : "");
+  $("r-force").className = "value num " + (s.max_force > (s.force_limit || 20) ? "warn" : "");
   $("r-voice").textContent = s.voice;
   $("r-goal").innerHTML = s.goal_err_cm != null
     ? `${s.goal_err_cm} cm <span class="sub">from the real stop point · range ${s.goal_range_cm} cm` +

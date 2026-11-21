@@ -24,17 +24,21 @@ import pandas as pd
 
 DATA = "data/trajectory.csv"
 RESIDUALS = "data/trajectory_residuals.npy"
-REACH_CENTER = np.array([0.45, -0.15, 1.20])  # scene.xml reach_zone site (where hand-overs happen)
-FEATURES = ["px", "py", "pz", "vx", "vy", "vz", "speed", "s_center"]
+REACH_CENTER = np.array([0.0, -0.22, 1.40])  # the shoulder: hand-overs happen on a shell around it (sim/env.py)
+ARM_LENGTH = 0.48  # m, typical hand-over distance from the shoulder
+FEATURES = ["px", "py", "pz", "vx", "vy", "vz", "speed", "s_center", "s_shell"]
 LIVE_CONTEXT = 800
 
 
 def features(p, v):
-    """Position + velocity, plus how far along the path the reach-zone centre is (features before raw data)."""
+    """Position + velocity, plus how far along the path the shoulder is closest (s_center) and where the
+    path first reaches arm's length from it (s_shell): features before raw data."""
     p, v = np.asarray(p, float), np.asarray(v, float)
     speed = float(np.linalg.norm(v))
     u = v / max(speed, 1e-9)
-    return [*p, *v, speed, float((REACH_CENTER - p) @ u)]
+    b = float((REACH_CENTER - p) @ u)
+    disc = b * b - (float((p - REACH_CENTER) @ (p - REACH_CENTER)) - ARM_LENGTH ** 2)
+    return [*p, *v, speed, b, b - np.sqrt(disc) if disc > 0 else b]  # path misses the shell: closest point
 
 
 # --------------------------------------------------------------------- collection
@@ -42,7 +46,7 @@ _worker = {}
 
 
 def _init():
-    from arm_env import ArmEnv
+    from sim.env import ArmEnv
     _worker["env"] = ArmEnv()
 
 
@@ -113,7 +117,7 @@ def evaluate(path=DATA):
     preds = {
         "TabPFN-3.5-fast": med,
         "linear regression": LinearRegression().fit(X_tr, tr["dist_left"]).predict(X_te),
-        "closest point to reach zone": te["s_center"].to_numpy(),  # geometry only: stop nearest the zone centre
+        "geometry: reaches arm's length": te["s_shell"].to_numpy(),  # geometry only: stop at arm's length
         "average distance left": np.full(len(te), tr["dist_left"].mean()),
     }
     print(f"{len(tr)} context approaches, {len(te)} held-out; true distance left "

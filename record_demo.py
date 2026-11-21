@@ -13,7 +13,7 @@ import cv2
 import mujoco
 import numpy as np
 
-from arm_env import ArmEnv
+from sim.env import RELEASE_ACTION, ArmEnv  # the new simulator
 
 FPS = 25
 
@@ -41,8 +41,8 @@ def main():
         print(f"no TabPFN stop-point prediction ({type(e).__name__}); using the simulator's")
         goal = None
     env = ArmEnv(goal_predictor=goal)
-    marker = env.sim.m.site("goal_pred").id
-    renderer = mujoco.Renderer(env.sim.m, 480, 640)
+    marker = env.m.site("goal_pred").id
+    renderer = mujoco.Renderer(env.m, 480, 640)
     kept, seen = 0, set()
     for seed in range(args.max_tries):
         obs, _ = env.reset(seed=50_000 + seed)
@@ -51,7 +51,7 @@ def main():
         frames, success, released_steps = [], False, 0
         for k in range(env.n_steps):
             if success:
-                action = np.array([0, 0, 0, -1.0])  # "release": open the hand for 1 s, then end
+                action = RELEASE_ACTION  # "release": open the hand for 1 s, then end
                 released_steps += 1
                 if released_steps > FPS:
                     break
@@ -59,8 +59,8 @@ def main():
                 action = act(env, obs)
             obs, _, terminated, truncated, info = env.step(action)
             success = success or (terminated and info["success"])
-            env.sim.m.site_pos[marker] = env.G_pred if env.G_pred is not None else [0, 0, -5]
-            renderer.update_scene(env.sim.d, camera="demo")
+            env.m.site_pos[marker] = env.G_pred if env.G_pred is not None else [0, 0, -5]
+            renderer.update_scene(env.d, camera="demo")
             img = cv2.cvtColor(renderer.render(), cv2.COLOR_RGB2BGR)
             ident = env.predicted if env.detected else "-"
             status = ("SUCCESS - released" if released_steps else "SUCCESS - holding") if success else ("grasping" if env.detected else env.voice)
