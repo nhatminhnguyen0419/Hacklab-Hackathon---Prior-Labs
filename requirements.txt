@@ -1,4 +1,4 @@
-mujoco>=3.3
+mujoco>=4.0
 numpy
 gymnasium>=1.0
 stable-baselines3>=2.3
