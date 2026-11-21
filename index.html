@@ -111,6 +111,11 @@
   .tile.wide { grid-column: span 2; }
   .tile .sub { font-size: 12px; color: var(--muted); font-weight: 500; }
 
+  .predict { margin-bottom: 10px; border-color: rgba(139, 123, 255, .35); background: rgba(139, 123, 255, .07); }
+  .pbar { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, .07); margin: 10px 0 6px; overflow: hidden; }
+  .pfill { height: 100%; width: 0; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .4s; }
+  .pfill.low { background: linear-gradient(90deg, var(--bad), var(--warn)); }
+
   /* dataset */
   .drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px; border-radius: 12px;
           border: 1.5px dashed rgba(148, 170, 200, .3); text-align: center; cursor: pointer; transition: .15s; color: var(--muted); }
@@ -191,6 +196,11 @@
       <div class="hero" id="hero">
         <div class="icon" id="hero-icon" aria-hidden="true">•</div>
         <div><div class="label">Result</div><div class="value" id="r-success">Waiting</div></div>
+      </div>
+      <div class="tile wide predict" id="hold-tile">
+        <div class="label">Will it hold? <span class="sub">TabPFN-3.5, predicted at first touch</span></div>
+        <div class="pbar"><div class="pfill" id="hold-fill"></div></div>
+        <div class="value num" id="r-hold">–</div>
       </div>
       <div class="tiles">
         <div class="tile wide"><div class="label">Identified object</div><div class="value" id="r-ident">–</div></div>
@@ -274,6 +284,12 @@ function showState(s) {
   $("r-force").textContent = `${s.max_force} N`;
   $("r-force").className = "value num " + (s.max_force > 20 ? "warn" : "");
   $("r-voice").textContent = s.voice;
+  const p = s.hold_p;
+  $("hold-fill").style.width = p == null ? "0" : `${(p * 100).toFixed(0)}%`;
+  $("hold-fill").className = "pfill" + (p != null && p < 0.5 ? " low" : "");
+  $("r-hold").innerHTML = p != null ? `${(p * 100).toFixed(0)}% <span class="sub">chance of a stable hold</span>`
+    : s.time_to_grasp != null ? "predicting…"
+    : `– <span class="sub">${s.grasp_model === "ready" ? "waiting for first touch" : "model " + s.grasp_model}</span>`;
   $("r-ctrl").textContent = s.controller;
   $("p-tab").textContent = s.tabpfn;
   $("p-tab-dot").className = "dot " + (s.tabpfn === "ready" ? "ok" : s.tabpfn === "loading" ? "warn" : "bad");

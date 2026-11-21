@@ -28,6 +28,7 @@ from PIL import Image
 
 from arm_env import ArmEnv
 from generate_dataset import EPISODE_COLUMNS, STEP_COLUMNS
+from grasp_outcome import touch_features
 
 MODEL_PATH = "models/ppo_arm.zip"
 FPS = 25
@@ -50,6 +51,22 @@ def _load_tabpfn():
 
 
 threading.Thread(target=_load_tabpfn, daemon=True).start()
+
+# "What happens next": P(stable hold) predicted at first touch (grasp_outcome.py)
+grasp = {"clf": None, "status": "loading"}
+
+
+def _load_grasp():
+    try:
+        from grasp_outcome import FEATURES, load_predictor
+        clf = load_predictor()
+        clf.predict_proba(np.zeros((1, len(FEATURES))))  # warm-up: the first call is ~15x slower
+        grasp["clf"], grasp["status"] = clf, "ready"
+    except Exception as e:  # missing data file/package: the app still runs without the prediction
+        grasp["status"] = f"unavailable ({type(e).__name__})"
+
+
+threading.Thread(target=_load_grasp, daemon=True).start()
 
 
 def load_policy():
@@ -142,6 +159,10 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             pred = await asyncio.to_thread(tabpfn["clf"].predict, [list(env.features)])
             ident["name"], ident["by"] = str(pred[0]), "TabPFN-3.5"
     asyncio.create_task(identify())
+    hold = {"p": None, "asked": False}
+
+    async def predict_hold(row):
+        hold["p"] = float(await asyncio.to_thread(lambda: grasp["clf"].predict_proba([row])[0, 1]))
 
     for k in range(MAX_LIVE_SECONDS * FPS):
         t0 = time.perf_counter()
@@ -158,6 +179,9 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             action = policy(env, obs)
         obs, _, terminated, _, info = env.step(action)
         max_force = max(max_force, env.total_f)
+        if env.t_touch is not None and not hold["asked"] and grasp["clf"] is not None:
+            hold["asked"] = True  # the row is taken now, at first touch; the answer arrives ~0.1 s later
+            asyncio.create_task(predict_hold(touch_features(env)))
         if terminated and info["success"] and not success:  # a 1 s hold with the wrist misaligned is not a success
             success, t_success = True, k / FPS
 
@@ -177,6 +201,7 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             "time_to_grasp": None if env.t_touch is None or env.t_carrier0 is None
             else round(env.t_touch - env.t_carrier0, 2),
             "max_force": round(max_force, 1),
+            "hold_p": None if hold["p"] is None else round(hold["p"], 3), "grasp_model": grasp["status"],
         }))
         if t_release is not None and k / FPS - t_release > 1.0:
             break
