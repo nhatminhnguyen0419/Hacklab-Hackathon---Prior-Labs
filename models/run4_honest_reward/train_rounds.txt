@@ -1,6 +1,0 @@
-ROUND total_steps=1000000 success=3/100 best_so_far=-1/100
-NEW BEST 3/100 saved to models/ppo_arm_best.zip
-ROUND total_steps=1500000 success=1/100 best_so_far=3/100
-grep: train_log.txt: No such file or directory
-ROUND total_steps=2000000 success=/100 best_so_far=3/100
-TRAINING FAILED
