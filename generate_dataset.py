@@ -146,6 +146,10 @@ class ArmSim:
         self.obj_v = {o: m.joint(f"{o}_free").dofadr[0] for o in OBJECTS}
         self.weld = {o: m.equality(f"hold_{o}").id for o in OBJECTS}
         self.grip_weld = {o: m.equality(f"grip_{o}").id for o in OBJECTS}
+        self.obj_geoms = {o: list(range(m.body_geomadr[self.obj_body[o]],
+                                        m.body_geomadr[self.obj_body[o]] + m.body_geomnum[self.obj_body[o]]))
+                          for o in OBJECTS}
+        self.conaffinity0 = m.geom_conaffinity.copy()
 
         # Arm and finger bodies (for contact checks)
         root = m.body("shoulder").id
@@ -184,20 +188,34 @@ class ArmSim:
         mujoco.mj_kinematics(self.m, self.d)
         return pos, R
 
-    def attach(self, obj, on):
-        """Grasp assist: weld obj to the hand at their current relative pose (on) or let go (off)."""
-        e, ob = self.grip_weld[obj], self.obj_body[obj]
+    def obj_in_hand(self, obj):
+        """Object pose in the hand frame: (position, quaternion)."""
+        ob = self.obj_body[obj]
+        Rh = self.d.xmat[self.hand].reshape(3, 3)
+        qh_inv, q = np.zeros(4), np.zeros(4)
+        mujoco.mju_negQuat(qh_inv, self.d.xquat[self.hand])
+        mujoco.mju_mulQuat(q, qh_inv, self.d.xquat[ob])
+        return Rh.T @ (self.d.xpos[ob] - self.d.xpos[self.hand]), q
+
+    def attach(self, obj, on, pose=None):
+        """Grasp assist: weld obj to the hand at pose (object in hand frame, default: where it is now),
+        or let go. Call again with a new pose to move the held object."""
+        e = self.grip_weld[obj]
         if on:
-            # relpose = pose of body2 (hand) in the frame of body1 (object)
-            po, Ro = self.d.xpos[ob], self.d.xmat[ob].reshape(3, 3)
-            ph = self.d.xpos[self.hand]
-            qo_inv = np.zeros(4)
-            mujoco.mju_negQuat(qo_inv, self.d.xquat[ob])
-            q = np.zeros(4)
-            mujoco.mju_mulQuat(q, qo_inv, self.d.xquat[self.hand])
-            self.m.eq_data[e][3:6] = Ro.T @ (ph - po)
-            self.m.eq_data[e][6:10] = q
+            p, q = pose if pose is not None else self.obj_in_hand(obj)
+            # the weld's relpose is the other way round: hand (body2) in the object (body1) frame
+            q_inv, R = np.zeros(4), np.zeros(9)
+            mujoco.mju_negQuat(q_inv, q)
+            mujoco.mju_quat2Mat(R, q)
+            self.m.eq_data[e][3:6] = -R.reshape(3, 3).T @ p
+            self.m.eq_data[e][6:10] = q_inv
         self.d.eq_active[e] = int(on)
+
+    def hand_contact(self, obj, on):
+        """Turn the object's collisions with the arm on/off (arm geoms have conaffinity 0, so the
+        object's conaffinity alone decides; it still hits the floor through its contype)."""
+        for g in self.obj_geoms[obj]:
+            self.m.geom_conaffinity[g] = self.conaffinity0[g] if on else 0
 
     def contact_forces(self, obj):
         """Total normal force object-arm and object-fingers (N)."""

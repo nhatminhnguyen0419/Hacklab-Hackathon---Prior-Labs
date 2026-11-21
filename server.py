@@ -156,9 +156,9 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             t_release = t_release or k / FPS
         else:
             action = policy(env, obs)
-        obs, _, terminated, _, _ = env.step(action)
+        obs, _, terminated, _, info = env.step(action)
         max_force = max(max_force, env.total_f)
-        if terminated and not success:
+        if terminated and info["success"] and not success:  # a 1 s hold with the wrist misaligned is not a success
             success, t_success = True, k / FPS
 
         renderer.update_scene(env.sim.d, camera="demo")

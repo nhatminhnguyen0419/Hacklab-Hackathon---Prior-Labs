@@ -17,18 +17,65 @@ import mujoco
 import numpy as np
 
 from generate_dataset import (
-    ACTUATORS, ALIGN_TOL, ARM_JOINTS, DETECT_DIST, FORCE_LIMIT, GRASP_TRIGGER_DIST, GRIP_CLOSED,
+    ACTUATORS, ALIGN_TOL, ARM_JOINTS, DETECT_DIST, FORCE_LIMIT, GRASP_RADIUS, GRASP_TRIGGER_DIST, GRIP_CLOSED,
     HOLD_TIME_FOR_SUCCESS, LET_GO_DELAY, MAX_EPISODE_TIME, OBJECTS, REWARD, ROUNDNESS, SQUEEZE,
     SYMMETRY, TRUE_DIMS,
     ArmSim, classify, grasp_local, mat_to_quat, nearest_equivalent, wrap_err,
 )
 
 SUCCESS_BONUS = 200.0                          # "stable hold: biggest bonus" (spec 6); must dominate every shaping term
-GRIP_HOLD = 0.3                                # rad, grip command above this keeps the grasp assist on
+GRIP_HOLD = 0.3                                # rad, grip command above this at hand-over turns the grasp assist on
+GRIP_RELEASE = 0.1                             # rad, ...and below this lets go: the agent's command dips to ~0.34
+                                               # right after grasping, so 0.3 dropped good grasps
 EARLY_GRASP_DIST = 0.10                       # m, early_grasp penalty only when the object is farther than this
 MAX_RATE = np.array([1.5, 1.5, 3.0, 3.5])      # rad/s at action = +-1 (shoulder, elbow, wrist, grip)
 VOICES = ["idle", "ready", "stop"]             # "release" is never reached: success ends the episode
 OBS_SIZE = 3 + 3 + 1 + 6 + 3 + 4 + 3 + 3 + 5 + 2 + 1 + 3 + 2
+
+
+SNAP_TIME = 0.25                               # s, held object slides into the palm over this time
+# rad, grip angle where the fingers just touch each object at its palm pose (measured; pen: thumb meets it)
+WRAP_GRIP = {"cup": 0.27, "bottle": 0.6, "box": 0.6, "pen": 0.8, "ball": 0.6}
+PALM_X = 0.030                                # m, along the palm: between the thumb (heel) and the finger roots
+LONG_AXIS = {"cup": 2, "bottle": 2, "pen": 2, "box": 0}  # object-frame long axis; it lies across the palm (hand z)
+
+
+def slerp(q0, q1, s):
+    v = np.zeros(3)
+    mujoco.mju_subQuat(v, q1, q0)
+    q = q0.copy()
+    mujoco.mju_quatIntegrate(q, v, s)
+    return q
+
+
+def _turn(q, a, b):
+    """q rotated by the smallest rotation taking unit vector a onto b (hand frame)."""
+    axis = np.cross(a, b)
+    if np.linalg.norm(axis) < 1e-9:
+        return q
+    dq, out = np.zeros(4), np.zeros(4)
+    mujoco.mju_axisAngle2Quat(dq, axis / np.linalg.norm(axis), math.acos(np.clip(a @ b, -1, 1)))
+    mujoco.mju_mulQuat(out, dq, q)
+    return out
+
+
+def palm_pose(obj, q):
+    """Where a held object sits (hand frame): against the palm face, centred across the fingers,
+    long axis across the palm. q = its orientation now; the nearest such orientation is kept."""
+    # wide objects shift toward the fingers to clear the thumb, which stands up at the heel (x ~ 0)
+    p = np.array([max(PALM_X, GRASP_RADIUS[obj] + 0.006), 0.012 + GRASP_RADIUS[obj] + 0.003, 0.0])
+    if obj not in LONG_AXIS:
+        return p, q  # ball: any orientation
+    R = np.zeros(9)
+    mujoco.mju_quat2Mat(R, q)
+    a = R.reshape(3, 3)[:, LONG_AXIS[obj]]
+    q = _turn(q, a, np.array([0, 0, 1.0 if a[2] >= 0 else -1.0]))
+    if obj == "box":  # thin side (local z) facing the palm: spin about hand z onto +-y
+        mujoco.mju_quat2Mat(R, q)
+        c = R.reshape(3, 3)[:, 2]
+        c = np.array([c[0], c[1], 0.0]) / max(np.linalg.norm(c[:2]), 1e-9)
+        q = _turn(q, c, np.array([0, 1.0 if c[1] >= 0 else -1.0, 0]))
+    return p, q
 
 
 class ArmEnv(gym.Env):
@@ -51,8 +98,10 @@ class ArmEnv(gym.Env):
         for o in OBJECTS:
             d.eq_active[sim.weld[o]] = 0
             d.eq_active[sim.grip_weld[o]] = 0
+            sim.hand_contact(o, True)  # model field: mj_resetData doesn't restore it
         self.assisted = False
         self.held = False
+        self.snap = (None, None, None, None, 1.0)
 
         # Object, arm start pose and hand-over point: same sampling as generate_dataset.run_episode
         self.obj = obj = OBJECTS[rng.integers(len(OBJECTS))]
@@ -131,6 +180,8 @@ class ArmEnv(gym.Env):
         a = np.clip(np.asarray(action, dtype=float), -1, 1)
         self.ctrl = np.clip(self.ctrl + a * MAX_RATE * sim.dt, self.ctrl_lo, self.ctrl_hi)
         d.ctrl[:] = self.ctrl
+        if self.assisted:
+            d.ctrl[3] = WRAP_GRIP[self.obj]  # fingers rest on the held object; the agent's command still decides release
         mujoco.mj_step(sim.m, d, nstep=sim.substeps)
         self.k += 1
         t = self.k * sim.dt
@@ -159,9 +210,20 @@ class ArmEnv(gym.Env):
             if self.finger_f > 0.2 and self.ctrl[3] > GRIP_HOLD:
                 sim.attach(self.obj, True)
                 self.assisted = True
-        if self.assisted and self.ctrl[3] < GRIP_HOLD:  # hand opened ("release", or the agent let go)
-            sim.attach(self.obj, False)
+                # The fingertips catch the object wherever they touch it. Draw it into the palm so it looks
+                # held. Its collisions with the hand stay off while held: the thumb is coupled to the fingers
+                # and would pin wide objects with the fingers half open, so the pose is set, not simulated.
+                self.snap = (*sim.obj_in_hand(self.obj), *palm_pose(self.obj, sim.obj_in_hand(self.obj)[1]), 0.0)
+                sim.hand_contact(self.obj, False)
+        if self.assisted and self.snap[4] < 1.0:
+            p0, q0, p1, q1, s = self.snap
+            s = min(1.0, s + sim.dt / SNAP_TIME)
+            self.snap = (p0, q0, p1, q1, s)
+            sim.attach(self.obj, True, (p0 + (p1 - p0) * s, slerp(q0, q1, s)))
+        if self.assisted and self.ctrl[3] < GRIP_RELEASE:  # hand opened ("release", or the agent let go)
+            sim.attach(self.obj, False)  # hand collisions stay off (reset restores them): it sits inside the fingers
             self.assisted = False
+            self.snap = (None, None, None, None, 1.0)
 
         held = self.held = (not self.weld_on) and (
             self.assisted or (self.finger_f > 0.2 and self.grasp_dist < 0.06))
