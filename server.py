@@ -195,7 +195,8 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
         else:
             action = policy(env, obs)
         obs, _, terminated, _, info = env.step(action)
-        max_force = max(max_force, env.total_f)
+        if not env.weld_on:  # the hand's own grip, after the person lets go (their push at hand-over peaks 300-500 N)
+            max_force = max(max_force, env.total_f)
         if env.G_range is not None:
             env.m.site_pos[marker] = env.G_pred
         if env.t_touch is not None and not hold["asked"] and grasp["clf"] is not None:
@@ -205,6 +206,7 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             success, t_success = True, k / FPS
 
         renderer.update_scene(env.d, camera="demo")
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # shadows doubled the frame time: live view fell to half speed
         buf = io.BytesIO()
         Image.fromarray(renderer.render()).save(buf, format="JPEG", quality=75)
         await ws.send_bytes(buf.getvalue())

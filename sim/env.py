@@ -29,11 +29,15 @@ FORCE_LIMIT = 150.0              # N, summed contact force above this = hard imp
                                  # sums 54-124 N over its many finger contacts (old hand: 20 N)
 MAX_VEL = 0.5                    # m/s hand speed at action = +-1
 MAX_WRIST = 3.0                  # rad/s
-MAX_GRIP = 3.0                   # grip units (0 open .. 1 closed) per s
+MAX_GRIP = 3.0                   # grip units (0 open .. 1 closed) per s (2.0 / 1.5 tested: fewer successes, more force)
 WRIST_RANGE = (-1.6, 1.6)        # rad, wrist turn the targets may ask for
 WORKSPACE = (np.array([0.05, -0.55, 0.75]), np.array([0.62, 0.10, 1.45]))  # hand target box (m)
 LET_GO_GRIP = 0.6                # the person lets go once the hand is this closed on the object...
-LET_GO_DELAY = 0.15              # ...for this long after the fingers first touch it
+LET_GO_DELAY = 0.15              # ...for this long after the fingers first touch it. Tested and dropped (100 fresh
+                                 # episodes): waiting for the fingers to settle (82 vs 81 %, more force); the person
+                                 # stopping pushing at first touch (66 %: pressing it into the palm helps the grasp)
+HELD_DIST = 0.10                 # m, object within this of the grasp point counts as held
+                                 # (0.06 scored 6 of 100 real holds as drops: this hand holds things off-centre)
 GRIP_HOLD = 0.3                  # grip above this counts as "closing" (grasp bonus, early-grasp penalty)
 EARLY_GRASP_DIST = 0.10          # m, closing farther than this from the object is penalised
 SUCCESS_BONUS = 200.0
@@ -226,7 +230,7 @@ class ArmEnv(gym.Env):
             self.weld_on = False
             d.eq_active[self.weld[self.obj]] = 0
 
-        self.held = (not self.weld_on) and self.finger_f > 0.2 and self.grasp_dist < 0.06
+        self.held = (not self.weld_on) and self.finger_f > 0.2 and self.grasp_dist < HELD_DIST
         if self.held:
             self.held_time += self.dt
 

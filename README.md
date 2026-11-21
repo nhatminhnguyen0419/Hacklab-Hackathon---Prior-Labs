@@ -32,18 +32,18 @@ All numbers are on held-out data that the models never saw (fixed evaluation see
 |---|---|---|---|
 | What is it? | **100%** accuracy | hand-written rule 98.3% | 600 episodes |
 | Where will it stop? | **2.6 cm** median error, 6.0 cm at the 90th percentile; 10–90% range covers 79% | linear regression 2.7 / 6.6 cm; geometry 4.5 / 11.1 cm | 750 approaches |
-| Will the grasp hold? | **ROC AUC 0.977**, Brier 0.047, accuracy 0.923 | logistic regression 0.863 / 0.106 / 0.846; wrist-angle rule 0.583 / 0.144 / 0.856 | 599 grasps |
+| Will the grasp hold? | **ROC AUC 0.945**, Brier 0.051, accuracy 0.933 | logistic regression 0.795 / 0.102 / 0.873; wrist-angle rule 0.578 / 0.127 / 0.873 | 598 grasps |
 
-A note on the stop point: with our engineered “arm’s length” feature, linear regression comes close in the median. TabPFN’s edge there is the bad cases and a calibrated uncertainty range. The hold prediction is well calibrated at the ends (says 96% → 98% held; says 4% → 0% held) and somewhat over-confident in the middle (says 71% → 54% held).
+A note on the stop point: with our engineered “arm’s length” feature, linear regression comes close in the median. TabPFN’s edge there is the bad cases and a calibrated uncertainty range. The hold prediction is well calibrated at the ends (says 97% → 97% held; says 7% → 2% held) and somewhat under-confident in the middle (says 71% → 81% held).
 
 **The arm** (grasp success, 200 held-out episodes, real contact physics, no grasp assist)
 
 | Controller | Success |
 |---|---|
 | Scripted expert (knows the hand-over pose) | 87.5% (35/40) |
-| Agent imitating the expert | 64% |
-| **Agent after 1M PPO steps, acting on TabPFN’s stop point** | **82%** (pen 32/43) |
-| Same agent given the simulator’s true stop point (reference) | 86% |
+| Agent imitating the expert | 65% |
+| **Agent after 1M PPO steps, acting on TabPFN’s stop point** | **84.5%** (169/200) |
+| Same agent given the simulator’s true stop point (reference) | 87.5% (175/200) |
 
 Live predictions take about **0.1 s on a laptop CPU** (fast TabPFN checkpoint with a cached context).
 
@@ -139,7 +139,9 @@ python record_demo.py --n 5 --rl
 
 - The hand-over is scripted: a straight-line carrier that lets go once the hand has closed.
 - Sensing is simulated: object pose and noisy shape features come from MuJoCo, not a camera.
-- The 7-joint arm’s elbow sometimes swings out sideways, and the grip force spikes briefly as the fingers close.
+- The 7-joint arm’s elbow sometimes swings out sideways.
+- The live view runs at about 0.75× real time on a laptop CPU (shadows are off in the live stream; recorded videos keep them).
+- “Held” means the object is in finger contact and within 10 cm of the grasp point; the cup is the hardest object (about 75–80%).
 - `data/run1_*` and the per-step dataset generator in `generate_dataset.py` come from our first, homemade simulator. The object classifier still uses `data/run1_features.csv`, but the generator needs porting to `sim/` before it can produce new per-step datasets. `data/run1_steps.csv` (173 MB) is not in the repo.
 
 ## Credits and licences
