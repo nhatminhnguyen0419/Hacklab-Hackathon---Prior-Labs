@@ -388,7 +388,7 @@ def run_episode(sim, ep, rng, viewer=None):
             werr = 0.0
         else:
             ideal = nearest_equivalent(wrist, q_star, period, wlo, whi)
-            werr = abs(wrist - ideal)
+            werr = abs(wrap_err(wrist, q_star, period))  # modulo the period: ideal may sit at a joint limit
 
         gp = sim.grasp_point(obj)
         grasp_dist = float(np.linalg.norm(opos - gp))

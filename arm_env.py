@@ -309,9 +309,8 @@ class ArmEnv(gym.Env):
             self.predicted = classify(self.features)
 
         wrist = d.qpos[sim.jq["wrist_rot"]]
-        wlo, whi = sim.jrange["wrist_rot"]
-        self.werr = 0.0 if self.period is None else abs(
-            wrist - nearest_equivalent(wrist, self.q_star, self.period, wlo, whi))
+        # modulo the symmetry period: a pen at +80 deg held with the wrist at -86 is 14 deg off, not 166
+        self.werr = 0.0 if self.period is None else abs(wrap_err(wrist, self.q_star, self.period))
         self.grasp_dist = float(np.linalg.norm(self.opos - sim.grasp_point(self.obj)))
         self.total_f, self.finger_f = sim.contact_forces(self.obj)
         self.contact = self.total_f > 0.05
