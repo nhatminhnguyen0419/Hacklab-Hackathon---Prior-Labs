@@ -1,0 +1,75 @@
+<!--
+  The 5 objects for HackLab #2: cup, bottle, box, pen, ball.
+  Real-world sizes, light masses so the hand can hold them.
+
+  How an object approaches ("handing over"):
+    - "carrier" is an invisible mocap body. Moving it moves the object.
+    - Each object has a weld (hold_<name>) to the carrier. All welds start OFF.
+    - Per episode, the runner script:
+        1. puts the chosen object at the carrier's pose,
+        2. turns that object's weld ON,
+        3. moves the carrier from a start point toward a point in the reach zone,
+        4. turns the weld OFF when the hand has grasped the object
+           (from then on, only the fingers hold it).
+    - Objects not in use stay parked on the floor behind the torso.
+
+  Object frames: the long axis of bottle, cup and pen is the object's local z axis.
+  The box's long side is local x. This matters for the wrist angle rules.
+-->
+<mujocoinclude>
+  <worldbody>
+    <!-- Invisible carrier that hands objects over -->
+    <body name="carrier" mocap="true" pos="0.9 -0.2 1.2">
+      <site name="carrier_site" type="sphere" size="0.01" rgba="0 1 0 0.3"/>
+    </body>
+
+    <!-- Cup: 8 cm wide, 10 cm tall, with a handle -->
+    <body name="cup" pos="-0.8 -0.6 0.051">
+      <freejoint name="cup_free"/>
+      <geom name="cup_body" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="cylinder" size="0.04 0.05" mass="0.15" rgba="0.9 0.9 0.85 1"/>
+      <geom name="cup_handle" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="box" pos="0.05 0 0" size="0.01 0.006 0.03" mass="0.01" rgba="0.9 0.9 0.85 1"/>
+    </body>
+
+    <!-- Bottle: 0.5 L, 6.6 cm wide, about 24 cm tall -->
+    <body name="bottle" pos="-0.8 -0.3 0.101">
+      <freejoint name="bottle_free"/>
+      <geom name="bottle_body" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="cylinder" size="0.033 0.1" mass="0.18" rgba="0.3 0.6 0.9 0.8"/>
+      <geom name="bottle_neck" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="cylinder" pos="0 0 0.12" size="0.013 0.02" mass="0.02" rgba="0.3 0.6 0.9 0.8"/>
+    </body>
+
+    <!-- Box: 10 x 6 x 4 cm -->
+    <body name="box" pos="-0.8 0.0 0.021">
+      <freejoint name="box_free"/>
+      <geom name="box_body" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="box" size="0.05 0.03 0.02" mass="0.15" rgba="0.85 0.6 0.3 1"/>
+    </body>
+
+    <!-- Pen: 14 cm long, 1.2 cm wide -->
+    <body name="pen" pos="-0.8 0.3 0.007" euler="0 90 0">
+      <freejoint name="pen_free"/>
+      <geom name="pen_body" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="capsule" size="0.006 0.07" mass="0.02" rgba="0.15 0.15 0.6 1"/>
+    </body>
+
+    <!-- Ball: 7 cm wide (tennis-ball size) -->
+    <body name="ball" pos="-0.8 0.6 0.036">
+      <freejoint name="ball_free"/>
+      <geom name="ball_body" contype="1" conaffinity="1" friction="1.2 0.01 0.001" condim="4" type="sphere" size="0.035" mass="0.06" rgba="0.8 0.9 0.2 1"/>
+    </body>
+  </worldbody>
+
+  <!-- One weld per object to the carrier. All OFF until the runner turns one on. -->
+  <equality>
+    <weld name="hold_cup"    body1="cup"    body2="carrier" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="hold_bottle" body1="bottle" body2="carrier" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="hold_box"    body1="box"    body2="carrier" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="hold_pen"    body1="pen"    body2="carrier" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="hold_ball"   body1="ball"   body2="carrier" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <!-- Grasp assist: the hand's 5 rigid fingers only touch objects at the fingertips and can't
+         hold them after hand-over (expert dropped 56%). arm_env turns this weld on at hand-over
+         if the fingers are closed on the object, and off when the hand opens. relpose is set then. -->
+    <weld name="grip_cup"    body1="cup"    body2="hand" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="grip_bottle" body1="bottle" body2="hand" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="grip_box"    body1="box"    body2="hand" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="grip_pen"    body1="pen"    body2="hand" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+    <weld name="grip_ball"   body1="ball"   body2="hand" relpose="0 0 0 1 0 0 0" active="false" solref="0.02 1"/>
+  </equality>
+</mujocoinclude>

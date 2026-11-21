@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Prosthetic Arm – HackLab #2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/static/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #070b12; --panel: rgba(20, 28, 40, .72); --panel-solid: #141c28; --line: rgba(148, 170, 200, .14);
+    --text: #e8edf4; --muted: #8b99ab; --accent: #5cc8ff; --accent2: #8b7bff;
+    --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --radius: 16px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text);
+    font: 15px/1.5 "Segoe UI Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(900px 500px at 10% -10%, rgba(92, 200, 255, .16), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, rgba(139, 123, 255, .14), transparent 60%),
+      var(--bg);
+  }
+  .num { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  /* header */
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 20px 28px; }
+  .logo { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none;
+          background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 6px 24px rgba(92, 200, 255, .35); }
+  .logo svg { width: 24px; height: 24px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .pills { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px;
+          background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .pill b { color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(320px, 1fr); gap: 20px; padding: 4px 28px 28px; align-items: start; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; padding: 4px 16px 20px; } header { padding: 16px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px;
+            backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 14px; font-weight: 600; }
+  .stack { display: grid; gap: 20px; align-content: start; }
+
+  /* live view */
+  .viewer { position: relative; border-radius: 12px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+  #view { width: 100%; aspect-ratio: 4/3; display: block; object-fit: contain; }
+  .badge { position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: 7px;
+           padding: 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+           background: rgba(0, 0, 0, .55); backdrop-filter: blur(6px); }
+  .badge .dot.live { background: var(--bad); box-shadow: 0 0 10px var(--bad); animation: pulse 1.4s infinite; }
+  .badge.time { left: auto; right: 12px; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; pointer-events: none; }
+  #view[src] + .placeholder { display: none; }
+  #view:not([src]) { visibility: hidden; }  /* no broken-image icon before the first frame */
+
+  /* pipeline */
+  .steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 16px 0 4px; padding: 0; list-style: none; }
+  .steps li { position: relative; text-align: center; font-size: 11.5px; color: var(--muted); padding-top: 22px; }
+  .steps li::before { content: ""; position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+                      width: 12px; height: 12px; border-radius: 50%; background: #2a3546; border: 2px solid #3a475a; transition: .25s; }
+  .steps li::after { content: ""; position: absolute; top: 9px; left: calc(50% + 10px); right: calc(-50% + 10px);
+                     height: 2px; background: #2a3546; transition: .25s; }
+  .steps li:last-child::after { display: none; }
+  .steps li.done { color: var(--text); }
+  .steps li.done::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 12px rgba(92, 200, 255, .6); }
+  .steps li.done::after { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .steps li.win::before { background: var(--ok); border-color: var(--ok); box-shadow: 0 0 14px var(--ok); }
+
+  /* buttons */
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  button { font: inherit; font-weight: 600; font-size: 14px; display: inline-flex; align-items: center; gap: 8px;
+           padding: 11px 18px; border-radius: 11px; border: 1px solid var(--line); background: #1b2533; color: var(--text);
+           cursor: pointer; transition: transform .12s, border-color .15s, box-shadow .15s, background .15s; }
+  button:hover { transform: translateY(-1px); border-color: rgba(255, 255, 255, .28); }
+  button:active { transform: translateY(0); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  button svg { width: 16px; height: 16px; flex: none; }
+  #start { background: linear-gradient(135deg, var(--accent), var(--accent2)); border-color: transparent; color: #061018; }
+  #start:hover { box-shadow: 0 8px 24px rgba(92, 200, 255, .35); }
+  button.ready   { color: var(--accent); }
+  button.release { color: var(--ok); }
+  button.stop    { color: var(--bad); }
+  button.ready[aria-pressed="true"]   { background: rgba(92, 200, 255, .14); border-color: var(--accent); }
+  button.release[aria-pressed="true"] { background: rgba(52, 211, 153, .14); border-color: var(--ok); }
+  button.stop[aria-pressed="true"]    { background: rgba(248, 113, 113, .14); border-color: var(--bad); }
+  #mic { margin-left: auto; }
+  #mic[aria-pressed="true"] { background: rgba(248, 113, 113, .14); border-color: var(--bad); color: var(--bad); }
+  .status { margin-top: 12px; color: var(--muted); font-size: 13px; min-height: 1.5em; }
+
+  /* results */
+  .hero { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 12px;
+          background: rgba(255, 255, 255, .03); border: 1px solid var(--line); margin-bottom: 14px; transition: .25s; }
+  .hero .icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 20px;
+                background: #232e3e; flex: none; transition: .25s; }
+  .hero .label { font-size: 12px; color: var(--muted); }
+  .hero .value { font-size: 20px; font-weight: 700; }
+  .hero.ok { border-color: rgba(52, 211, 153, .45); background: rgba(52, 211, 153, .08); }
+  .hero.ok .icon { background: var(--ok); color: #04140d; }
+  .hero.warn { border-color: rgba(251, 191, 36, .4); }
+  .hero.warn .icon { background: var(--warn); color: #1a1203; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { padding: 12px 14px; border-radius: 12px; background: rgba(255, 255, 255, .03); border: 1px solid var(--line); min-width: 0; }
+  .tile .label { font-size: 12px; color: var(--muted); }
+  .tile .value { margin-top: 2px; font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+  .tile.wide { grid-column: span 2; }
+  .tile .sub { font-size: 12px; color: var(--muted); font-weight: 500; }
+
+  /* dataset */
+  .drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 22px 16px; border-radius: 12px;
+          border: 1.5px dashed rgba(148, 170, 200, .3); text-align: center; cursor: pointer; transition: .15s; color: var(--muted); }
+  .drop:hover, .drop.over { border-color: var(--accent); background: rgba(92, 200, 255, .06); color: var(--text); }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop svg { width: 28px; height: 28px; color: var(--accent); }
+  .drop strong { color: var(--text); font-weight: 600; }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  #stats { margin-top: 16px; }
+  #stats .tiles { margin-bottom: 14px; }
+  .chart-box { position: relative; height: 190px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td:not(:first-child), th:not(:first-child) { text-align: right; }
+  td:first-child { text-transform: capitalize; font-weight: 500; }
+  .bar { display: inline-block; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); vertical-align: middle; margin-right: 8px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 16px 24px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#061018" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 20l5-7 4 2 5-9"/><circle cx="18" cy="6" r="2.2" fill="#061018"/><circle cx="4" cy="20" r="1.6" fill="#061018"/>
+    </svg>
+  </div>
+  <div>
+    <h1>Prosthetic Arm</h1>
+    <p>HackLab #2 · live MuJoCo simulation · RL control · object ID by TabPFN-3.5</p>
+  </div>
+  <div class="pills">
+    <span class="pill"><span class="dot" id="p-conn-dot"></span><span id="p-conn">Connecting</span></span>
+    <span class="pill">Controller <b id="r-ctrl">–</b></span>
+    <span class="pill"><span class="dot" id="p-tab-dot"></span>TabPFN <b id="p-tab">–</b></span>
+  </div>
+</header>
+
+<main>
+  <section aria-labelledby="sim-h">
+    <h2 id="sim-h">Live simulation</h2>
+    <div class="viewer">
+      <img id="view" alt="Live camera view of the simulated prosthetic arm">
+      <div class="placeholder">Press “New episode” to start the simulation</div>
+      <span class="badge"><span class="dot live"></span>LIVE</span>
+      <span class="badge time num" id="r-time">0.0 s</span>
+    </div>
+
+    <ol class="steps" aria-label="Episode progress">
+      <li id="st-ready">Ready</li>
+      <li id="st-detect">Detected</li>
+      <li id="st-ident">Identified</li>
+      <li id="st-grasp">Grasped</li>
+      <li id="st-hold">Holding</li>
+      <li id="st-win">Success</li>
+    </ol>
+
+    <div class="buttons">
+      <button id="start">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>New episode</button>
+      <button id="ready" class="ready" data-cmd="ready">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>Ready</button>
+      <button id="release" class="release" data-cmd="release">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 11V6.5a1.5 1.5 0 013 0V11m0-5.5v-1a1.5 1.5 0 013 0V11m0-5a1.5 1.5 0 013 0V13m-9-2.5a1.5 1.5 0 00-3 0V14a7 7 0 0014 0v-3"/></svg>Release</button>
+      <button id="stop" class="stop" data-cmd="stop">
+        <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop</button>
+      <button id="mic" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>Voice</button>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite">Connecting…</div>
+  </section>
+
+  <div class="stack">
+    <section aria-labelledby="res-h">
+      <h2 id="res-h">Results</h2>
+      <div class="hero" id="hero">
+        <div class="icon" id="hero-icon" aria-hidden="true">•</div>
+        <div><div class="label">Result</div><div class="value" id="r-success">Waiting</div></div>
+      </div>
+      <div class="tiles">
+        <div class="tile wide"><div class="label">Identified object</div><div class="value" id="r-ident">–</div></div>
+        <div class="tile"><div class="label">Wrist error at grasp</div><div class="value num" id="r-wrist">–</div></div>
+        <div class="tile"><div class="label">Time to grasp</div><div class="value num" id="r-ttg">–</div></div>
+        <div class="tile"><div class="label">Max contact force</div><div class="value num" id="r-force">–</div></div>
+        <div class="tile"><div class="label">Voice command</div><div class="value" id="r-voice">–</div></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="data-h">
+      <h2 id="data-h">Dataset</h2>
+      <label class="drop" id="drop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0l-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></svg>
+        <span><strong>Upload a dataset CSV</strong> or drop it here</span>
+        <span style="font-size:12px">per-step or per-episode file</span>
+        <input type="file" id="csv" accept=".csv">
+      </label>
+      <div class="status" id="upload-status" role="status" aria-live="polite"></div>
+      <div id="stats" hidden>
+        <div class="tiles">
+          <div class="tile"><div class="label">Episodes</div><div class="value num" id="s-eps"></div></div>
+          <div class="tile"><div class="label">Success rate</div><div class="value num" id="s-succ"></div></div>
+          <div class="tile"><div class="label">Detection rate</div><div class="value num" id="s-det"></div></div>
+          <div class="tile"><div class="label">Mean time to grasp</div><div class="value num" id="s-ttg"></div></div>
+          <div class="tile wide"><div class="label">Mean max force</div><div class="value num" id="s-force"></div></div>
+        </div>
+        <div class="chart-box"><canvas id="chart" aria-label="Success rate per object" role="img"></canvas></div>
+        <table id="obj-table"><thead><tr><th>Object</th><th>Episodes</th><th>Successes</th><th>Rate</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </div>
+</main>
+<footer>Simulated prosthetic arm · voice-activated, the arm never grabs unless you say “ready”</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const status = msg => $("status").textContent = msg;
+let ws, chart, lastUrl;
+
+function setConn(ok, text) {
+  $("p-conn").textContent = text;
+  $("p-conn-dot").className = "dot " + (ok ? "ok" : "bad");
+}
+
+// ---------- live simulation
+function connect() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/sim`);
+  ws.binaryType = "blob";
+  ws.onopen = () => { setConn(true, "Connected"); status("Connected. Press “New episode”, then say or press “Ready”."); };
+  ws.onclose = () => { setConn(false, "Offline"); status("Disconnected from the backend – retrying…"); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    if (ev.data instanceof Blob) {
+      const url = URL.createObjectURL(ev.data);
+      $("view").src = url;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = url;
+      return;
+    }
+    const s = JSON.parse(ev.data);
+    if (s.episode_over) { status(s.success ? "Episode over: success. Press “New episode” for another." : "Episode over."); return; }
+    showState(s);
+  };
+}
+
+function step(id, on, cls = "done") { $(id).className = on ? cls : ""; }
+
+function showState(s) {
+  const hero = $("hero");
+  $("r-success").textContent = s.success ? "Success" : s.held ? "Holding…" : s.time_to_grasp != null ? "Grasping…"
+                             : s.detected ? "Reaching…" : s.voice === "stop" ? "Stopped" : "Waiting";
+  hero.className = "hero " + (s.success ? "ok" : s.held || s.time_to_grasp != null ? "warn" : "");
+  $("hero-icon").textContent = s.success ? "✓" : s.held ? "✊" : s.detected ? "↗" : "•";
+
+  $("r-ident").innerHTML = s.identified
+    ? `<span style="text-transform:capitalize">${s.identified}</span> <span class="sub">by ${s.identified_by}</span>`
+    : s.detected ? "identifying…" : "–";
+  $("r-wrist").textContent = s.wrist_error_deg == null ? "–" : `${s.wrist_error_deg}°`;
+  $("r-wrist").className = "value num " + (s.wrist_error_deg == null ? "" : s.wrist_error_deg <= 15 ? "ok" : "bad");
+  $("r-ttg").textContent = s.time_to_grasp == null ? "–" : `${s.time_to_grasp} s`;
+  $("r-force").textContent = `${s.max_force} N`;
+  $("r-force").className = "value num " + (s.max_force > 20 ? "warn" : "");
+  $("r-voice").textContent = s.voice;
+  $("r-ctrl").textContent = s.controller;
+  $("p-tab").textContent = s.tabpfn;
+  $("p-tab-dot").className = "dot " + (s.tabpfn === "ready" ? "ok" : s.tabpfn === "loading" ? "warn" : "bad");
+  $("r-time").textContent = `${s.t.toFixed(1)} s`;
+
+  step("st-ready", s.voice !== "idle");
+  step("st-detect", s.detected);
+  step("st-ident", !!s.identified);
+  step("st-grasp", s.time_to_grasp != null);
+  step("st-hold", s.held || s.success);
+  step("st-win", s.success, "done win");
+  status(s.success ? "Object held. Say or press “Release” to open the hand."
+       : s.voice === "idle" ? "Say or press “Ready” to arm the hand." : `Running · t = ${s.t.toFixed(1)} s`);
+}
+
+function send(cmd) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
+  document.querySelectorAll("[data-cmd]").forEach(b => b.setAttribute("aria-pressed", b.dataset.cmd === cmd));
+}
+$("start").onclick = () => { send("start"); document.querySelectorAll("[data-cmd]").forEach(b => b.setAttribute("aria-pressed", false)); };
+document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => send(b.dataset.cmd));
+
+// ---------- voice (Chrome / Edge speech recognition; buttons stay as the fallback)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR) { $("mic").disabled = true; $("mic").title = "Speech recognition not supported in this browser"; }
+else {
+  const rec = new SR(); rec.continuous = true; rec.lang = "en-US";
+  let on = false;
+  rec.onresult = e => {
+    const said = e.results[e.results.length - 1][0].transcript.toLowerCase();
+    const cmd = ["ready", "release", "stop"].find(c => said.includes(c));
+    if (cmd) { send(cmd); status(`Heard “${cmd}”`); }
+  };
+  rec.onend = () => { if (on) rec.start(); };  // keep listening
+  $("mic").onclick = () => {
+    on = !on; $("mic").setAttribute("aria-pressed", on);
+    on ? rec.start() : rec.stop();
+  };
+}
+
+// ---------- dataset upload
+async function upload(f) {
+  if (!f) return;
+  $("upload-status").textContent = `Uploading ${f.name} (${(f.size / 1e6).toFixed(1)} MB)…`;
+  const body = new FormData(); body.append("file", f);
+  let r;
+  try { r = await (await fetch("/upload", { method: "POST", body })).json(); }
+  catch (e) { $("upload-status").textContent = "✖ Upload failed: " + e.message; return; }
+  if (!r.ok) { $("upload-status").textContent = "✖ " + r.error; $("stats").hidden = true; return; }  // error may quote file text: no innerHTML
+  $("upload-status").innerHTML = `<span class="ok">✔</span> ${r.kind} file, ${r.rows.toLocaleString()} rows – columns match the spec`;
+  $("stats").hidden = false;
+  $("s-eps").textContent = r.episodes.toLocaleString();
+  $("s-succ").textContent = (r.success_rate * 100).toFixed(1) + "%";
+  $("s-det").textContent = (r.detection_rate * 100).toFixed(1) + "%";
+  $("s-ttg").textContent = isNaN(r.mean_time_to_grasp) ? "–" : r.mean_time_to_grasp + " s";
+  $("s-force").textContent = r.mean_max_force + " N";
+  const objs = Object.keys(r.per_object);
+  const rate = o => r.per_object[o].successes / r.per_object[o].episodes;
+  $("obj-table").tBodies[0].innerHTML = objs.map(o =>
+    `<tr><td>${o}</td><td class="num">${r.per_object[o].episodes}</td><td class="num">${r.per_object[o].successes}</td>` +
+    `<td class="num"><span class="bar" style="width:${Math.round(rate(o) * 60)}px"></span>${(rate(o) * 100).toFixed(1)}%</td></tr>`).join("");
+  if (window.Chart) {
+    chart?.destroy();
+    const ctx = $("chart").getContext("2d");
+    const grad = ctx.createLinearGradient(0, 0, 0, 190);
+    grad.addColorStop(0, "#5cc8ff"); grad.addColorStop(1, "#8b7bff");
+    chart = new Chart(ctx, {
+      type: "bar",
+      data: { labels: objs, datasets: [{ label: "Success rate (%)", data: objs.map(o => +(rate(o) * 100).toFixed(1)),
+              backgroundColor: grad, borderRadius: 8, maxBarThickness: 44 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+                 scales: { y: { beginAtZero: true, max: 100, ticks: { color: "#8b99ab", callback: v => v + "%" }, grid: { color: "rgba(148,170,200,.1)" } },
+                           x: { ticks: { color: "#8b99ab" }, grid: { display: false } } } }
+    });
+  }
+}
+$("csv").onchange = () => upload($("csv").files[0]);
+const drop = $("drop");
+["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", ev => upload(ev.dataTransfer.files[0]));
+
+connect();
+</script>
+</body>
+</html>

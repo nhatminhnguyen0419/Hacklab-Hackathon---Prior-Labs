@@ -1,0 +1,15 @@
+mujoco>=3.3
+numpy
+gymnasium>=1.0
+stable-baselines3>=2.3
+torch
+scikit-learn
+tabpfn
+tabpfn-extensions
+fastapi
+uvicorn
+websockets
+python-multipart
+pillow
+opencv-python
+pandas

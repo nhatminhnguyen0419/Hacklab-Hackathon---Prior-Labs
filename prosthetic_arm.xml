@@ -1,0 +1,193 @@
+<!--
+  Prosthetic arm model - HackLab #2
+  Right arm, mounted at the shoulder of a fixed torso.
+
+  Controlled joints (actuators):
+    shoulder_inout : swings the arm inward (+) / outward (-), vertical axis
+    elbow          : bends the forearm up (+) / down (-); 0 = forearm horizontal
+    wrist_rot      : twists the hand; 0 = handshake (palm facing the body midline)
+                     + = palm turns up, - = palm turns down
+    grip           : closes all 5 fingers together (0 = open curved shape, 1.2 = closed)
+
+  Each finger has 3 segments. Only index_j1 is driven; every other finger joint
+  copies it through equality constraints, so the hand closes as ONE movement.
+
+  Sensor: one IMU (accelerometer + gyro) on the middle segment of the thumb.
+  Arm geoms do not collide with each other, only with objects and the floor.
+-->
+<mujoco model="prosthetic_arm">
+  <compiler angle="degree"/>
+
+  <default>
+    <default class="arm">
+      <geom contype="1" conaffinity="0" rgba="0.75 0.78 0.82 1"/>
+      <joint damping="2" armature="0.02"/>
+    </default>
+    <default class="finger">
+      <joint type="hinge" axis="0 0 1" range="0 70" damping="0.05" armature="0.001"/>
+      <geom type="capsule" size="0.008" contype="1" conaffinity="0"
+            friction="1.5 0.02 0.001" condim="4" rgba="0.35 0.38 0.42 1"/>
+    </default>
+    <default class="thumb">
+      <joint type="hinge" axis="0 0 -1" range="0 60" damping="0.05" armature="0.001"/>
+      <geom type="capsule" size="0.009" contype="1" conaffinity="0"
+            friction="1.5 0.02 0.001" condim="4" rgba="0.35 0.38 0.42 1"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <!-- Fixed torso (visual only, no collisions) -->
+    <body name="torso" pos="0 0 1.15">
+      <geom type="box" size="0.10 0.17 0.25" contype="0" conaffinity="0" rgba="0.55 0.6 0.7 0.6"/>
+    </body>
+
+    <!-- Shoulder: in/out swing about the vertical axis -->
+    <body name="shoulder" pos="0 -0.22 1.40" childclass="arm">
+      <joint name="shoulder_inout" type="hinge" axis="0 0 1" range="-35 70"/>
+      <geom type="sphere" size="0.05"/>
+
+      <!-- Upper arm points forward and 45 degrees down -->
+      <body name="upper_arm" euler="0 45 0">
+        <geom type="capsule" fromto="0 0 0 0.30 0 0" size="0.04"/>
+
+        <!-- Elbow: forearm is horizontal at 0, bends up with + -->
+        <body name="forearm" pos="0.30 0 0" euler="0 -45 0">
+          <joint name="elbow" type="hinge" axis="0 -1 0" range="-45 100"/>
+          <geom type="sphere" size="0.042"/>
+          <geom type="capsule" fromto="0 0 0 0.27 0 0" size="0.035"/>
+
+          <!-- Wrist: twist about the forearm axis -->
+          <body name="hand" pos="0.29 0 0">
+            <joint name="wrist_rot" type="hinge" axis="1 0 0" range="-90 90"/>
+            <!-- Palm: thin in y, palm face points +y (toward body midline at 0) -->
+            <geom name="palm" type="box" pos="0.025 0 0" size="0.045 0.012 0.042"/>
+            <site name="palm_touch" type="box" pos="0.025 0.013 0" size="0.04 0.003 0.038"
+                  rgba="0.2 0.6 1 0.3"/>
+
+            <!-- Index finger (drives the grip) -->
+            <body name="index_1" pos="0.07 0 0.03" euler="0 0 10" childclass="finger">
+              <joint name="index_j1"/>
+              <geom fromto="0 0 0 0.035 0 0"/>
+              <body name="index_2" pos="0.035 0 0" euler="0 0 15">
+                <joint name="index_j2"/>
+                <geom fromto="0 0 0 0.025 0 0"/>
+                <body name="index_3" pos="0.025 0 0" euler="0 0 15">
+                  <joint name="index_j3"/>
+                  <geom fromto="0 0 0 0.02 0 0" size="0.007"/>
+                </body>
+              </body>
+            </body>
+
+            <!-- Middle finger -->
+            <body name="middle_1" pos="0.07 0 0.01" euler="0 0 10" childclass="finger">
+              <joint name="middle_j1"/>
+              <geom fromto="0 0 0 0.038 0 0"/>
+              <body name="middle_2" pos="0.038 0 0" euler="0 0 15">
+                <joint name="middle_j2"/>
+                <geom fromto="0 0 0 0.027 0 0"/>
+                <body name="middle_3" pos="0.027 0 0" euler="0 0 15">
+                  <joint name="middle_j3"/>
+                  <geom fromto="0 0 0 0.021 0 0" size="0.007"/>
+                </body>
+              </body>
+            </body>
+
+            <!-- Ring finger -->
+            <body name="ring_1" pos="0.07 0 -0.01" euler="0 0 10" childclass="finger">
+              <joint name="ring_j1"/>
+              <geom fromto="0 0 0 0.035 0 0"/>
+              <body name="ring_2" pos="0.035 0 0" euler="0 0 15">
+                <joint name="ring_j2"/>
+                <geom fromto="0 0 0 0.025 0 0"/>
+                <body name="ring_3" pos="0.025 0 0" euler="0 0 15">
+                  <joint name="ring_j3"/>
+                  <geom fromto="0 0 0 0.02 0 0" size="0.007"/>
+                </body>
+              </body>
+            </body>
+
+            <!-- Little finger -->
+            <body name="little_1" pos="0.07 0 -0.03" euler="0 0 10" childclass="finger">
+              <joint name="little_j1"/>
+              <geom fromto="0 0 0 0.028 0 0" size="0.007"/>
+              <body name="little_2" pos="0.028 0 0" euler="0 0 15">
+                <joint name="little_j2"/>
+                <geom fromto="0 0 0 0.02 0 0" size="0.007"/>
+                <body name="little_3" pos="0.02 0 0" euler="0 0 15">
+                  <joint name="little_j3"/>
+                  <geom fromto="0 0 0 0.017 0 0" size="0.006"/>
+                </body>
+              </body>
+            </body>
+
+            <!-- Thumb: opposes the fingers. Sits at the heel of the palm, sticks out from the
+                 palm face (+y) and curls toward the fingertips (+x), in the same plane the
+                 fingers curl in. It also blocks objects from sliding off the heel. -->
+            <body name="thumb_1" pos="-0.012 0.014 -0.01" euler="0 0 80" childclass="thumb">
+              <joint name="thumb_j1"/>
+              <geom fromto="0 0 0 0.032 0 0"/>
+              <body name="thumb_2" pos="0.032 0 0" euler="0 0 -15">
+                <joint name="thumb_j2"/>
+                <geom fromto="0 0 0 0.026 0 0"/>
+                <!-- The one motion sensor: IMU on the thumb's middle segment -->
+                <site name="thumb_imu" pos="0.013 0 0" size="0.006" rgba="1 0.3 0.2 1"/>
+                <body name="thumb_3" pos="0.026 0 0" euler="0 0 -15">
+                  <joint name="thumb_j3"/>
+                  <geom fromto="0 0 0 0.02 0 0" size="0.008"/>
+                  <site name="thumb_tip" type="sphere" pos="0.02 0 0" size="0.011" rgba="1 0.6 0.2 0.3"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- All finger joints copy index_j1, so the hand closes as one movement -->
+  <equality>
+    <joint joint1="index_j2"  joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="index_j3"  joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="middle_j1" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="middle_j2" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="middle_j3" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="ring_j1"   joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="ring_j2"   joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="ring_j3"   joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="little_j1" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="little_j2" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="little_j3" joint2="index_j1" polycoef="0 1 0 0 0"/>
+    <joint joint1="thumb_j1"  joint2="index_j1" polycoef="0 0.8 0 0 0"/>
+    <joint joint1="thumb_j2"  joint2="index_j1" polycoef="0 0.8 0 0 0"/>
+    <joint joint1="thumb_j3"  joint2="index_j1" polycoef="0 0.8 0 0 0"/>
+  </equality>
+
+  <!-- 4 actions for the agent. ctrl values are target joint angles in radians. -->
+  <actuator>
+    <position name="shoulder_inout" joint="shoulder_inout" kp="120" kv="8"
+              ctrlrange="-0.61 1.22" forcerange="-40 40"/>
+    <position name="elbow" joint="elbow" kp="100" kv="6"
+              ctrlrange="-0.78 1.74" forcerange="-30 30"/>
+    <position name="wrist_rot" joint="wrist_rot" kp="20" kv="1"
+              ctrlrange="-1.57 1.57" forcerange="-6 6"/>
+    <position name="grip" joint="index_j1" kp="6" kv="0.2"
+              ctrlrange="0 1.22" forcerange="-3 3"/>
+  </actuator>
+
+  <sensor>
+    <!-- Thumb IMU -->
+    <accelerometer name="thumb_acc"  site="thumb_imu"/>
+    <gyro          name="thumb_gyro" site="thumb_imu"/>
+    <!-- Joint state -->
+    <jointpos name="shoulder_pos" joint="shoulder_inout"/>
+    <jointpos name="elbow_pos"    joint="elbow"/>
+    <jointpos name="wrist_pos"    joint="wrist_rot"/>
+    <jointpos name="grip_pos"     joint="index_j1"/>
+    <jointvel name="shoulder_vel" joint="shoulder_inout"/>
+    <jointvel name="elbow_vel"    joint="elbow"/>
+    <jointvel name="wrist_vel"    joint="wrist_rot"/>
+    <!-- Contact force on palm and thumb tip -->
+    <touch name="palm_touch" site="palm_touch"/>
+    <touch name="thumb_touch" site="thumb_tip"/>
+  </sensor>
+</mujoco>

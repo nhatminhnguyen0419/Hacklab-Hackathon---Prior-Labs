@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# 173 MB, over GitHub's 100 MB limit; regenerate: python generate_dataset.py --episodes 3000 --out data/run1
+data/run1_steps.csv
