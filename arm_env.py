@@ -81,8 +81,10 @@ def palm_pose(obj, q):
 class ArmEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, scene_path="scene.xml", rate_hz=25.0):
+    def __init__(self, scene_path="scene.xml", rate_hz=25.0, goal_predictor=None, goal_noise=None):
         self.sim = ArmSim(scene_path, rate_hz)
+        self.goal_predictor = goal_predictor  # (pos, vel) -> (stop point, interval); see trajectory.py
+        self.goal_noise = None if goal_noise is None else np.load(goal_noise)  # .npy of predictor errors
         self.n_steps = int(MAX_EPISODE_TIME / self.sim.dt)
         self.action_space = gym.spaces.Box(-1.0, 1.0, (4,), np.float32)
         self.observation_space = gym.spaces.Box(-np.inf, np.inf, (OBS_SIZE,), np.float32)
@@ -116,6 +118,8 @@ class ArmEnv(gym.Env):
         self.q_target = q_target = [rng.uniform(-0.4, 0.9), rng.uniform(-0.5, 1.2), self.q_star]
         hpos, hR = sim.forward_at(q_target)
         self.G = hpos + hR @ grasp_local(obj)
+        self.G_seen, self.G_range = self.G, None  # replaced by the predictor's guess at detection, if any
+        self.G_pred = None
 
         align = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], float) if obj == "box" else np.eye(3)
         spin = rng.uniform(0, 2 * math.pi) if obj in ("cup", "bottle", "pen") else 0.0
@@ -307,6 +311,22 @@ class ArmEnv(gym.Env):
                 and float(self.ovel @ to_hand) > 0):
             self.detected = True
             self.predicted = classify(self.features)
+            # where the object will stop: the simulator's true hand-over point in training (+ one of
+            # TabPFN's real errors with goal_noise); with a predictor plugged in, see below
+            if self.goal_predictor is not None:
+                self.G_seen = self.opos.copy()  # never the true point; until the prediction, where it is now
+            elif self.goal_noise is not None:
+                self.G_seen = self.G + self.goal_noise[self.np_random.integers(len(self.goal_noise))]
+        # TabPFN's stop-point prediction, once the object has moved >= 0.2 s: its context rows all were
+        # (in live mode it starts at "ready", and a velocity from the first step is still ramping up)
+        if (self.detected and self.goal_predictor is not None and self.G_range is None
+                and self.t_carrier0 is not None and self.k * sim.dt - self.t_carrier0 >= 0.2):
+            self.G_seen, self.G_range = self.goal_predictor(self.opos, self.ovel)
+            self.G_pred = self.G_seen.copy()  # kept: G_seen switches to the seen position on arrival
+        # once it has stopped (still in the carrier, not touched), where it stops is seen, not predicted
+        if (self.G_range is not None and self.weld_on and self.t_touch is None
+                and float(np.linalg.norm(self.ovel)) < 0.02):
+            self.G_seen = self.opos.copy()
 
         wrist = d.qpos[sim.jq["wrist_rot"]]
         # modulo the symmetry period: a pen at +80 deg held with the wrist at -86 is 14 deg off, not 166
@@ -325,7 +345,7 @@ class ArmEnv(gym.Env):
             rel_vel = R.T @ self.ovel
             # ASSUMPTION: perception predicts where the approaching object will stop (the hand-over
             # point). Without it the agent only learned 0-3%: the expert it copies knows this point.
-            rel_goal = R.T @ (self.G - self.hand_pos)
+            rel_goal = R.T @ (self.G_seen - self.hand_pos)
         else:
             rel_pos, rel_quat, rel_vel, rel_goal = np.zeros(3), np.zeros(4), np.zeros(3), np.zeros(3)
         # Classifier output and its wrist target (spec 5: "identified type and ideal wrist angle")

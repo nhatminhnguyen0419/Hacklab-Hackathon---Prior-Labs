@@ -68,6 +68,20 @@ def _load_grasp():
 
 threading.Thread(target=_load_grasp, daemon=True).start()
 
+# "Where it's going": stop point predicted at detection (trajectory.py); the agent uses it
+traj = {"predict": None, "status": "loading"}
+
+
+def _load_traj():
+    try:
+        from trajectory import load_predictor
+        traj["predict"], traj["status"] = load_predictor(), "ready"
+    except Exception as e:  # without it the agent falls back to the simulator's true stop point
+        traj["status"] = f"unavailable ({type(e).__name__})"
+
+
+threading.Thread(target=_load_traj, daemon=True).start()
+
 
 def load_policy():
     # RL by default: it beats the scripted controller (92% vs 80%). ARM_CONTROLLER=scripted to switch back.
@@ -150,7 +164,10 @@ async def sim_socket(ws: WebSocket):
 
 
 async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
+    env.goal_predictor = traj["predict"]
     obs, _ = env.reset(seed=int(time.time()), options={"live": True})
+    marker = env.sim.m.site("goal_pred").id
+    env.sim.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
     ident = {"name": None}
     success, t_success, t_release, max_force = False, None, None, 0.0
 
@@ -179,6 +196,8 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             action = policy(env, obs)
         obs, _, terminated, _, info = env.step(action)
         max_force = max(max_force, env.total_f)
+        if env.G_range is not None:
+            env.sim.m.site_pos[marker] = env.G_pred
         if env.t_touch is not None and not hold["asked"] and grasp["clf"] is not None:
             hold["asked"] = True  # the row is taken now, at first touch; the answer arrives ~0.1 s later
             asyncio.create_task(predict_hold(touch_features(env)))
@@ -202,6 +221,12 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             else round(env.t_touch - env.t_carrier0, 2),
             "max_force": round(max_force, 1),
             "hold_p": None if hold["p"] is None else round(hold["p"], 3), "grasp_model": grasp["status"],
+            # stop point: TabPFN's guess vs where the object really stops (the simulator knows), and the 10-90% range
+            "goal_err_cm": None if env.G_range is None else round(100 * float(np.linalg.norm(env.G_pred - env.G)), 1),
+            "goal_range_cm": None if env.G_range is None else round(100 * (env.G_range[1] - env.G_range[0]), 1),
+            "arrive_in": None if env.G_range is None or env.t_carrier0 is None
+            else round(max(0.0, env.travel_time - (env.k * env.sim.dt - env.t_carrier0)), 1),
+            "traj_model": traj["status"],
         }))
         if t_release is not None and k / FPS - t_release > 1.0:
             break

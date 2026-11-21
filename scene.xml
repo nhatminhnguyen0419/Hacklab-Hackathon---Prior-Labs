@@ -27,6 +27,8 @@
     <!-- Reach zone: where objects are handed over (visual only, no collisions).
          Approach start points are 0.4-0.7 m away from this zone, in front of the arm. -->
     <site name="reach_zone" type="box" pos="0.45 -0.15 1.20" size="0.10 0.15 0.15" rgba="0.2 1 0.4 0.08"/>
+    <!-- TabPFN's predicted stop point (trajectory.py); the web app moves it, parked below the floor otherwise -->
+    <site name="goal_pred" type="sphere" size="0.022" pos="0 0 -5" rgba="1 0.3 0.75 0.75"/>
     <!-- Fixed camera for the web app's live image stream -->
     <camera name="demo" pos="1.2 -1.2 1.7" mode="targetbody" target="forearm"/>
   </worldbody>

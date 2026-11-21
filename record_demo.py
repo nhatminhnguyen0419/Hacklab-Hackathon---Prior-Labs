@@ -34,7 +34,14 @@ def main():
         act, who = (lambda env, obs: env.expert_action()), "scripted controller"
 
     os.makedirs(args.out, exist_ok=True)
-    env = ArmEnv()
+    try:  # the agent uses TabPFN's predicted stop point, shown as the pink marker (as in the web app)
+        from trajectory import load_predictor
+        goal = load_predictor()
+    except Exception as e:
+        print(f"no TabPFN stop-point prediction ({type(e).__name__}); using the simulator's")
+        goal = None
+    env = ArmEnv(goal_predictor=goal)
+    marker = env.sim.m.site("goal_pred").id
     renderer = mujoco.Renderer(env.sim.m, 480, 640)
     kept, seen = 0, set()
     for seed in range(args.max_tries):
@@ -50,8 +57,9 @@ def main():
                     break
             else:
                 action = act(env, obs)
-            obs, _, terminated, truncated, _ = env.step(action)
-            success = success or terminated
+            obs, _, terminated, truncated, info = env.step(action)
+            success = success or (terminated and info["success"])
+            env.sim.m.site_pos[marker] = env.G_pred if env.G_pred is not None else [0, 0, -5]
             renderer.update_scene(env.sim.d, camera="demo")
             img = cv2.cvtColor(renderer.render(), cv2.COLOR_RGB2BGR)
             ident = env.predicted if env.detected else "-"

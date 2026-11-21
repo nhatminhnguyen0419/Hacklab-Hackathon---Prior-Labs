@@ -21,9 +21,13 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from arm_env import ArmEnv
 
 
-def evaluate(path, episodes):
+def evaluate(path, episodes, tabpfn_goal=False):
     model = PPO.load(path)
-    env = ArmEnv()
+    goal = None
+    if tabpfn_goal:  # the agent sees TabPFN's predicted stop point instead of the simulator's true one
+        from trajectory import load_predictor
+        goal = load_predictor()
+    env = ArmEnv(goal_predictor=goal)
     ok, total = Counter(), Counter()
     for ep in range(episodes):
         obs, _ = env.reset(seed=10_000 + ep)  # fixed seeds: runs are comparable
@@ -77,13 +81,16 @@ def main():
     ap.add_argument("--bc", type=int, default=0, help="warm-start from N scripted-expert episodes")
     ap.add_argument("--eval", help="evaluate this .zip instead of training")
     ap.add_argument("--episodes", type=int, default=100)
+    ap.add_argument("--tabpfn-goal", action="store_true", help="eval: agent uses TabPFN's predicted stop point")
+    ap.add_argument("--goal-noise", help="train: add these predictor errors (.npy, from trajectory.py) to the stop point")
     args = ap.parse_args()
 
     if args.eval:
-        evaluate(args.eval, args.episodes)
+        evaluate(args.eval, args.episodes, args.tabpfn_goal)
         return
 
     env = make_vec_env(ArmEnv, n_envs=args.envs, vec_env_cls=SubprocVecEnv,
+                       env_kwargs={"goal_noise": args.goal_noise},
                        monitor_kwargs={"info_keywords": ("success",)})
     if args.resume:
         model = PPO.load(args.resume, env=env)

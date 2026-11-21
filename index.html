@@ -147,7 +147,7 @@
   </div>
   <div>
     <h1>Prosthetic Arm</h1>
-    <p>HackLab #2 · live MuJoCo simulation · RL control · object ID by TabPFN-3.5</p>
+    <p>HackLab #2 · live MuJoCo simulation · RL control · TabPFN-3.5 predicts what it is, where it stops and whether it will hold</p>
   </div>
   <div class="pills">
     <span class="pill"><span class="dot" id="p-conn-dot"></span><span id="p-conn">Connecting</span></span>
@@ -196,6 +196,10 @@
       <div class="hero" id="hero">
         <div class="icon" id="hero-icon" aria-hidden="true">•</div>
         <div><div class="label">Result</div><div class="value" id="r-success">Waiting</div></div>
+      </div>
+      <div class="tile wide predict">
+        <div class="label">Where is it going? <span class="sub">TabPFN-3.5, from one look at detection · <span style="color:#ff4dbf">●</span> in the view</span></div>
+        <div class="value num" id="r-goal">–</div>
       </div>
       <div class="tile wide predict" id="hold-tile">
         <div class="label">Will it hold? <span class="sub">TabPFN-3.5, predicted at first touch</span></div>
@@ -284,6 +288,10 @@ function showState(s) {
   $("r-force").textContent = `${s.max_force} N`;
   $("r-force").className = "value num " + (s.max_force > 20 ? "warn" : "");
   $("r-voice").textContent = s.voice;
+  $("r-goal").innerHTML = s.goal_err_cm != null
+    ? `${s.goal_err_cm} cm <span class="sub">from the real stop point · range ${s.goal_range_cm} cm` +
+      (s.arrive_in > 0 ? ` · arrives in ${s.arrive_in} s` : " · arrived") + "</span>"
+    : `– <span class="sub">${s.traj_model === "ready" ? "waiting for detection" : "model " + s.traj_model}</span>`;
   const p = s.hold_p;
   $("hold-fill").style.width = p == null ? "0" : `${(p * 100).toFixed(0)}%`;
   $("hold-fill").className = "pfill" + (p != null && p < 0.5 ? " low" : "");
