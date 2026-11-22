@@ -3,6 +3,7 @@ README pictures, rendered from the real simulator with the trained agent and Tab
   docs/images/hero.png       a person handing a bottle over; pink = TabPFN's predicted stop point
   docs/images/grasps.png     the five objects held by the hand (contact physics only)
   docs/images/sequence.png   one hand-over in four steps
+  docs/images/camera.png     a hand-over seen through the depth camera: the 3D view beside what the arm sees
 
   python make_pictures.py
 """
@@ -17,7 +18,7 @@ from stable_baselines3 import PPO
 from grasp_outcome import load_predictor as load_hold
 from make_pitch_video import F
 from sim.env import ArmEnv
-from trajectory import load_predictor as load_goal
+from trajectory import CAMERA_DATA, load_predictor as load_goal
 
 OUT = "docs/images"
 SEEDS = {"bottle": 60002, "cup": 60000, "pen": 60005, "ball": 60007}  # held hand-overs (make_pitch_video picks)
@@ -109,6 +110,20 @@ def main():
     for i, s in enumerate(shots):
         seq.paste(s, ((i % 2) * (960 + 12), (i // 2) * (540 + 12)))
     seq.save(f"{OUT}/sequence.png")
+
+    # 4. the depth camera: what the arm sees (object in pink) beside the 3D view, mid hand-over
+    cam = ArmEnv(goal_predictor=load_goal(CAMERA_DATA), hold_predictor=load_hold(), camera=True)
+    cam.m.site_rgba[cam.m.site("reach_zone").id, 3] = 0
+    play(cam, model, 61_000, lambda e, k: e.looks >= 3)  # make_pitch_video's camera hand-over
+    rc = renderer(cam, 720, 960)
+    rc.update_scene(cam.d, camera(np.array([0.6, -0.25, 1.15]), 1.8, 62, -12))
+    left = label(Image.fromarray(rc.render()), "3D view (pink dot: TabPFN's stop point)", size="h3")
+    right = label(Image.fromarray(cam.eye.picture()).resize((960, 720), Image.NEAREST),
+                  "What the arm sees: depth, object in pink", size="h3")
+    both = Image.new("RGB", (960 * 2 + 12, 720), (11, 19, 34))
+    both.paste(left, (0, 0))
+    both.paste(right, (960 + 12, 0))
+    both.save(f"{OUT}/camera.png")
 
     for f in sorted(os.listdir(OUT)):
         print(f"{OUT}/{f}: {Image.open(os.path.join(OUT, f)).size}")

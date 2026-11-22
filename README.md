@@ -15,6 +15,10 @@ Built at **HackLab Berlin × TabPFN** (Prior Labs track) by **The Big Gang**: Mi
 
 ![The hand holding a cup, bottle, box, pen and ball](docs/images/grasps.png)
 
+**Or seen only through a depth camera at the user's head** (`--camera`): the 3D view, and what the arm sees, with the object in pink:
+
+![A hand-over seen through the depth camera](docs/images/camera.png)
+
 ---
 
 ## What it does

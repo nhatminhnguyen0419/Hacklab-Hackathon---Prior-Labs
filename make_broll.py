@@ -2,7 +2,8 @@
 Footage for the 3-minute video's voice-over part: exactly 2:20, sections timed to docs/VIDEO_SCRIPT.md.
 
    0-10 s  the problem             10-22 s  robots run on tables     22-32 s  three questions
-  32-112 s five real hand-overs, 16 s each (bottle, cup, pen, ball, a re-grasp TabPFN triggered)
+  32-112 s five real hand-overs, 16 s each (bottle, cup, pen, one seen through the depth camera, a re-grasp
+           TabPFN triggered)
  112-140 s results: stop point, will it hold, grasp success
 
   python make_broll.py          # -> demo_replays/broll.mp4  (then: python make_final_video.py)
@@ -21,9 +22,9 @@ from stable_baselines3 import PPO
 from classifier import load_classifier
 from grasp_outcome import load_predictor as load_hold
 from make_pitch_video import (BG, CARD, CYAN, F, FPS, GREEN, H, LINE, MUTED, PINK, TEXT, W, caption_frames,
-                              pick_seeds, run_episode)
+                              pick_held_seed, pick_seeds, run_episode)
 from sim.env import ArmEnv
-from trajectory import load_predictor as load_goal
+from trajectory import CAMERA_DATA, load_predictor as load_goal
 
 OUT = "demo_replays/broll.mp4"
 EPISODE_S = 16  # each hand-over is stretched or held to exactly this, so the script's timings hold
@@ -109,6 +110,8 @@ def main():
     good, risky = pick_seeds(env, model)
     assert len(good) == 4 and risky is not None, f"not enough episodes found: {good}, {risky}"
     renderer = mujoco.Renderer(env.m, 585, 840)
+    cam_env = ArmEnv(goal_predictor=load_goal(CAMERA_DATA), hold_predictor=load_hold(), camera=True)
+    cam_seed = pick_held_seed(cam_env, model)
 
     frames = caption_frames([
         ("THE PROBLEM", "label", CYAN, 22),
@@ -123,17 +126,21 @@ def main():
         ("1   What is it?", "h2", PINK, 18),
         ("2   Where will it stop?   (it looks again every 0.2 s)", "h2", PINK, 18),
         ("3   Will this grasp hold?   (if not: re-grasp)", "h2", PINK, 0)], 10)
-    episodes = [(s, f"Hand-over {i + 1} of 4 · slowed for narration") for i, s in enumerate(good)]
-    episodes.append((risky, "When TabPFN says “risky” · slowed for narration"))
-    for seed, title in episodes:
-        ep, _, _ = run_episode(env, model, seed, ident_clf, renderer, title)
+    episodes = [(env, renderer, s, f"Hand-over {i + 1} of 4 · slowed for narration") for i, s in enumerate(good[:3])]
+    episodes.append((cam_env, mujoco.Renderer(cam_env.m, 585, 840), cam_seed,
+                     "Hand-over 4 of 4 · seen through the depth camera · slowed"))
+    episodes.append((env, renderer, risky, "When TabPFN says “risky” · slowed for narration"))
+    for e, r, seed, title in episodes:
+        ep, _, _ = run_episode(e, model, seed, ident_clf, r, title)
         frames += fit(ep, EPISODE_S)
     frames += table_card("RESULTS · 300 HAND-OVERS THE MODEL NEVER SAW", "Where will it stop?",
                          ["model", "median error", "90% under"],
                          [["TabPFN-3.5", "0.6 cm", "3.8 cm"], ["linear regression", "3.6 cm", "9.1 cm"],
                           ["physics: constant braking", "4.6 cm", "77 cm"],
-                          ["straight line to arm’s length", "8.7 cm", "22.2 cm"]],
-                         ["Each look sharpens it: 2.5 cm far away, 0.1 cm in the last 10 cm."], 9)
+                          ["straight line to arm’s length", "8.7 cm", "22.2 cm"],
+                          ["TabPFN, from the depth camera", "2.1 cm", "6.1 cm"]],
+                         ["Each look sharpens it: 2.5 cm far away, 0.1 cm in the last 10 cm.",
+                          "From camera pixels: still twice as good as linear regression (4.6 cm)."], 9)
     frames += table_card("RESULTS · 598 GRASPS THE MODEL NEVER SAW", "Will this grasp hold?  (at first touch)",
                          ["model", "ROC AUC", "Brier ↓"],
                          [["TabPFN-3.5", "0.961", "0.055"], ["logistic regression", "0.837", "0.109"],
@@ -144,7 +151,8 @@ def main():
         ("92%", "h1", GREEN, 4),
         ("grasp success: the arm acts on TabPFN’s predictions and re-grasps on its warning", "body", TEXT, 26),
         ("89% without the re-grasp.  21 re-grasps: 8 saved a grasp, 2 spoiled one, 11 changed nothing.", "body",
-         MUTED, 0)], 10)
+         MUTED, 12),
+        ("Seeing the object only through the depth camera: 81%.", "body", MUTED, 0)], 10)
 
     assert len(frames) == 140 * FPS, f"{len(frames) / FPS:.2f} s, the script expects 140 s"
     encode(frames, OUT)

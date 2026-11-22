@@ -42,8 +42,8 @@ Speaking pace: about 150 words a minute. Each block below fits its time slot wit
 **1:24 · Hand-over 3, pen**
 > The hand is the open-source TetherIA Aero Hand, tendon-driven like real prosthetics. The grasp is pure contact physics. Nothing is glued.
 
-**1:40 · Hand-over 4, ball**
-> At the moment of first touch, TabPFN predicts whether the grasp will hold.
+**1:40 · Hand-over 4, seen through the depth camera** *(footage: depth picture in the corner)*
+> This time the arm sees the object only through a depth camera at the user's head, the pink pixels in the corner. TabPFN learned the camera's errors in context. At first touch, it predicts whether the grasp will hold.
 
 **1:56 · The re-grasp** *(footage: “When TabPFN says risky”)*
 > And this is why that matters. TabPFN gives this grasp a low chance. So the hand opens and grasps again, while the person keeps holding it. This time it holds.
@@ -51,13 +51,13 @@ Speaking pace: about 150 words a minute. Each block below fits its time slot wit
 **2:12 · Results** *(footage: three result cards)*
 > On hand-overs it never saw, TabPFN predicts the stop point to six millimetres, six times better than linear regression.
 > It ranks risky grasps with an AUC of zero point nine six.
-> And the arm, acting on these predictions and re-grasping on TabPFN’s warning, succeeds ninety-two percent of the time.
+> And the arm, acting on these predictions and re-grasping on TabPFN’s warning, succeeds ninety-two percent of the time; eighty-one percent when it sees the object only through the camera.
 
 ---
 
 ## 2:40–3:00 · On camera (outro.mp4)
 
-> Next, we’d swap the simulator’s object tracking for a real depth camera, and use real hand-over recordings as context.
+> Next, we’d use real hand-over recordings as TabPFN’s context, and run the same pipeline on a real depth camera and arm.
 > Everything, code, models and data, is on our GitHub. Thanks for watching!
 
 ---
@@ -68,4 +68,4 @@ Speaking pace: about 150 words a minute. Each block below fits its time slot wit
 - **Voice-over:** a phone’s voice-memo app is fine. Start talking right after you press record, and play `demo_replays/broll.mp4` on a screen while you read, so the lines line up. Up to 2:20; a shorter recording ends in silence over the last footage.
 - **Then run** `python make_final_video.py` → `demo_replays/final_video.mp4` (3:00, 1280×720).
 
-Numbers quoted above are from held-out tests in this repository: stop point 0.6 cm median (linear regression 3.6 cm, 300 hand-overs), hold prediction ROC AUC 0.961 (598 grasps), grasp success 92% with the re-grasp (89% without, 200 episodes).
+Numbers quoted above are from held-out tests in this repository: stop point 0.6 cm median (linear regression 3.6 cm, 300 hand-overs), hold prediction ROC AUC 0.961 (598 grasps), grasp success 92% with the re-grasp (89% without, 200 episodes); with the depth camera, stop point 2.1 cm (linear regression 4.6 cm) and grasp success 81%.
