@@ -136,6 +136,7 @@ python record_demo.py --n 5 --rl
 | `server.py`, `index.html`, `static/` | Web app (FastAPI + one page, Chart.js served locally) |
 | `record_demo.py` | Records MP4 replays with the predicted-stop marker |
 | `make_pitch_video.py` | Renders the pitch video `demo_replays/pitch_demo.mp4` (needs ffmpeg) |
+| `docs/VIDEO_SCRIPT.md`, `make_broll.py`, `make_final_video.py` | The 3-minute submission video: timed script, 2:20 of footage, and the tool that stitches in the team's camera clips and voice-over |
 | `regrasp_eval.py` | Measures the re-grasp reflex: the same episodes with it off and on |
 | `generate_dataset.py` | Shared constants, reward weights and the object rule |
 | `models/ppo_arm.zip` | The trained agent used by the web app (`models/v3/` has the full run) |

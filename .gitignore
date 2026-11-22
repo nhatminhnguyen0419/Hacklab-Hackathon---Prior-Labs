@@ -4,3 +4,5 @@ __pycache__/
 data/run1_steps.csv
 # MuJoCo writes the harmless "keeping parent value" attach notices here
 MUJOCO_LOG.TXT
+# raw camera / voice recordings for make_final_video.py: personal, and can be large
+video_parts/
