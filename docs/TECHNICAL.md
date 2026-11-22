@@ -107,7 +107,7 @@ Still from the simulator in camera mode: the agent's relative object pose in its
 | Imitation only, on TabPFN's stop point | 72% (144/200) |
 | PPO, on TabPFN's stop point | 89% (178/200) |
 | + re-grasp when TabPFN says the grasp is risky | 92% (184/200) |
-| PPO with the depth camera, on TabPFN's camera stop point | 81% (162/200) |
+| PPO with the depth camera, on TabPFN's camera stop point | 81.5% (163/200) |
 
 ## 7. Problems we hit (and the fix)
 
@@ -117,6 +117,7 @@ Still from the simulator in camera mode: the agent's relative object pose in its
 | Grip force readings of 300–500 N | The person's push at hand-over was counted | Count force only after the person lets go |
 | Camera crash in MuJoCo's renderer | Anti-aliasing blends segmentation colours at object edges into invalid IDs | Camera renderer with `offsamples = 0` |
 | Camera never saw some objects (success 58–62%) | The translucent reach-zone *site* is drawn solid in segmentation and depth, hiding objects behind it | Hide all site groups in the camera's render; success 81% |
+| Camera mode: a late look 20 cm off | The object had stopped, but the camera's speed noise (~6 cm/s) read 0.19 m/s, so the arm kept looking and TabPFN extrapolated a phantom motion | With the camera, "stopped" means under 8 cm/s, and once stopped the arm stops looking and uses the seen position |
 | Camera position biased 2.7 cm toward the camera | Only the near surface is visible | Push back by ⅔ radius along the ray: 1.1 cm |
 | Live view at half speed | Shadows and a reflective floor | Shadows off in the live stream, plain floor |
 | Camera mode 8 points below perfect sensing (81% vs 89%) | The agent was trained on stop-point errors of the truth-based model | Tried: 500k more PPO steps with the camera's errors. It got worse (77% with the camera, 77% without), so we kept the original agent. Open: retrain from the start with camera errors, or with the camera in the loop |

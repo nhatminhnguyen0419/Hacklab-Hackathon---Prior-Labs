@@ -63,7 +63,7 @@ Of 21 re-grasps, 8 turned a drop into a hold, 2 spoiled a grasp that would have 
 |---|---|---|
 | Camera position error | – | 1.1 cm median, 1.7 cm at the 90th percentile |
 | TabPFN stop point | 0.6 cm | **2.1 cm** median (linear regression 4.6, straight line to arm's length 9.3); 1.2 cm in the last 10 cm |
-| Agent on TabPFN's stop point | 89% (178/200) | **81% (162/200)**, same agent, not retrained for the camera |
+| Agent on TabPFN's stop point | 89% (178/200) | **81.5% (163/200)**, same agent, not retrained for the camera |
 
 TabPFN learns the camera's errors in context: it is trained on rows logged from camera views (`data/trajectory_camera.csv`), with the true stop point as the target.
 

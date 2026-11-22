@@ -232,7 +232,7 @@ class ArmEnv(gym.Env):
         self.t_carrier0 = None if self.live else 0.0
 
         self.G_seen, self.G_range, self.G_pred = self.G, None, None
-        self.t_look, self.looks = -1e9, 0
+        self.t_look, self.looks, self.settled = -1e9, 0, False
         self.k = 0
         self.detected = False
         self.predicted = ""
@@ -411,7 +411,8 @@ class ArmEnv(gym.Env):
                 self.G_seen = self.seen[0].copy()  # never the true point; where it is until the first look
         # where it will stop: TabPFN looks again every LOOK_EVERY s while it moves (position, velocity,
         # acceleration: the arc and the slow-down); in training, the true point + TabPFN's real error
-        moving = self.seen is not None and float(np.linalg.norm(self.seen[1])) >= 0.02
+        stop_speed = 0.08 if self.eye else 0.02  # the camera's speed noise is ~6 cm/s: below 8 it may stand still
+        moving = self.seen is not None and not self.settled and float(np.linalg.norm(self.seen[1])) >= stop_speed
         if (self.detected and self.weld_on and self.t_touch is None and moving and self.t_carrier0 is not None
                 and t - self.t_carrier0 >= 0.2 and t - self.t_look >= LOOK_EVERY - 1e-9):
             self.t_look, self.looks = t, self.looks + 1
@@ -425,6 +426,8 @@ class ArmEnv(gym.Env):
                 self.G_seen = self.G + self.goal_noise[self.np_random.choice(pool), 1:]
         if self.detected and self.weld_on and self.t_touch is None and not moving and self.looks and self.seen is not None:
             self.G_seen = self.seen[0].copy()  # stopped: seen, not predicted
+            self.settled = self.eye is not None  # camera: once stopped, speed noise must not restart the looks
+                                                 # (it did: a 0.19 m/s phantom sent a look 20 cm off)
         self.werr = 0.0 if self.period is None else abs(wrap_err(self.wrist, self.q_star, self.period))
         self.total_f, self.finger_f = self.contact_forces()
         self.contact = self.total_f > 0.05

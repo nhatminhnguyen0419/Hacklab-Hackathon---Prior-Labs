@@ -68,4 +68,4 @@ Speaking pace: about 150 words a minute. Each block below fits its time slot wit
 - **Voice-over:** a phone’s voice-memo app is fine. Start talking right after you press record, and play `demo_replays/broll.mp4` on a screen while you read, so the lines line up. Up to 2:20; a shorter recording ends in silence over the last footage.
 - **Then run** `python make_final_video.py` → `demo_replays/final_video.mp4` (3:00, 1280×720).
 
-Numbers quoted above are from held-out tests in this repository: stop point 0.6 cm median (linear regression 3.6 cm, 300 hand-overs), hold prediction ROC AUC 0.961 (598 grasps), grasp success 92% with the re-grasp (89% without, 200 episodes); with the depth camera, stop point 2.1 cm (linear regression 4.6 cm) and grasp success 81%.
+Numbers quoted above are from held-out tests in this repository: stop point 0.6 cm median (linear regression 3.6 cm, 300 hand-overs), hold prediction ROC AUC 0.961 (598 grasps), grasp success 92% with the re-grasp (89% without, 200 episodes); with the depth camera, stop point 2.1 cm (linear regression 4.6 cm) and grasp success 81.5% (163/200).
