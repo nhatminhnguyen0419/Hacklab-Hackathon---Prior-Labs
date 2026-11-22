@@ -53,6 +53,16 @@ The stop-point error shrinks as the object approaches: 2.5 cm with more than 25 
 
 Of 21 re-grasps, 8 turned a drop into a hold, 2 spoiled a grasp that would have held, 11 changed nothing (`regrasp_eval.py`: the same episodes with the reflex off and on).
 
+**Seeing it with a camera** (`--camera`). The numbers above use the object's position as the simulator knows it. With a depth camera worn at the user's head instead (`sim/camera.py`: 240×180 depth + segmentation at 25 Hz, depth noise growing with distance, position/velocity/acceleration fitted over the last 0.4 s), the arm sees the object only in pixels:
+
+| | Perfect sensing | Depth camera |
+|---|---|---|
+| Camera position error | – | 1.1 cm median, 1.7 cm at the 90th percentile |
+| TabPFN stop point | 0.6 cm | **2.1 cm** median (linear regression 4.6, straight line to arm's length 9.3); 1.2 cm in the last 10 cm |
+| Agent on TabPFN's stop point | 89% (178/200) | **81% (162/200)**, same agent, not retrained for the camera |
+
+TabPFN learns the camera's errors in context: it is trained on rows logged from camera views (`data/trajectory_camera.csv`), with the true stop point as the target.
+
 Live predictions take about **0.1 s on a laptop CPU** (fast TabPFN checkpoint with a cached context); the arm waits for each one, because acting on a stale prediction cut success from 25/30 to 5/30.
 
 ## The simulator
@@ -61,6 +71,7 @@ Live predictions take about **0.1 s on a laptop CPU** (fast TabPFN checkpoint wi
   - **Kinova Gen3** arm, 7 joints, scaled to 60% so shoulder-to-wrist is about 0.7 m like a human arm, hanging from the shoulder.
   - **TetherIA Aero Hand Open**, a tendon-driven humanoid hand (0.45 kg), closed as one prosthetic-style power-grip synergy, with the tendon motors capped at 40 N.
   - An IMU (accelerometer + gyro) in the thumb.
+  - Optional depth camera at the user's head, like smart glasses (`--camera`): the object is found by segmentation, back-projected to 3D, and tracked.
 - **Actions** (5): hand velocity x/y/z, wrist turn rate, grip rate. Damped-least-squares inverse kinematics (`sim/ik.py`) turns them into the 7 joint targets.
 - **Hand-over:** a visible person brings the object along an arc to a point at about arm’s length from the shoulder, slowing down smoothly (a minimum-jerk profile, like human reaching), and lets go once the hand has closed on it.
 - **Grasps are physical:** objects are held by contact forces only.
@@ -105,6 +116,9 @@ python train.py --eval models/ppo_arm.zip --episodes 200                 # given
 python classifier.py                    # object ID vs the rule
 python trajectory.py --collect 1200     # log a row per look while objects approach -> data/trajectory.csv
 python trajectory.py                    # stop-point prediction vs baselines (saves the error vectors)
+python -m sim.camera                    # depth-camera tracking error vs the simulator's truth
+python trajectory.py --camera --collect 1200 && python trajectory.py --camera   # the same, seen by the camera
+python train.py --eval models/ppo_arm.zip --episodes 200 --tabpfn-goal --camera
 python regrasp_eval.py                  # the re-grasp reflex off vs on, same 200 episodes
 python grasp_outcome.py --collect 2400  # log grasps at first touch -> data/grasp_touch.csv
 python grasp_outcome.py                 # hold prediction vs baselines, with calibration
@@ -132,6 +146,7 @@ python record_demo.py --n 5 --rl
 | `sim/scene.xml`, `sim/objects.xml` | Floor, torso, camera, the five objects and the hand-over carrier |
 | `sim/build.py` | Loads the Menagerie arm and hand, scales and attaches them, adds the IMU, grip synergy |
 | `sim/ik.py` | Inverse kinematics for the hand |
+| `sim/camera.py` | Depth camera: segmentation, back-projection, quadratic-fit tracker |
 | `sim/env.py` | Gymnasium environment: hand-over, voice timeline, detection, rewards, scripted expert, TabPFN hooks |
 | `sim/menagerie/` | Kinova Gen3 and TetherIA Aero Hand Open models, with their licences |
 | `trajectory.py` | TabPFN: where the object will stop |
@@ -152,7 +167,7 @@ python record_demo.py --n 5 --rl
 ## Limitations
 
 - The hand-over is scripted: the person is a visual figure whose hand follows a generated arc, and lets go once the hand has closed.
-- Sensing is simulated: object pose and noisy shape features come from MuJoCo, not a camera.
+- With `--camera`, detection and TabPFN's inputs come from the depth camera; the agent's close-range view of the object (relative position in its observation), the shape features and contact sensing still come from the simulator. The web app and videos run without the camera.
 - The 7-joint arm’s elbow sometimes swings out sideways.
 - The live view runs at about 0.7× real time on a laptop CPU, because the arm waits for each TabPFN look (shadows are off in the live stream; recorded videos keep them).
 - “Held” means the object is in finger contact and within 10 cm of the grasp point; the cup is the hardest object (about 75–80%).

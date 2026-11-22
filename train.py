@@ -21,13 +21,13 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from sim.env import ArmEnv  # the new simulator (Kinova Gen3 + Aero Hand); the old one: git history
 
 
-def evaluate(path, episodes, tabpfn_goal=False):
+def evaluate(path, episodes, tabpfn_goal=False, camera=False):
     model = PPO.load(path)
     goal = None
     if tabpfn_goal:  # the agent sees TabPFN's predicted stop point instead of the simulator's true one
-        from trajectory import load_predictor
-        goal = load_predictor()
-    env = ArmEnv(goal_predictor=goal)
+        from trajectory import CAMERA_DATA, DATA, load_predictor
+        goal = load_predictor(CAMERA_DATA if camera else DATA)  # camera: TabPFN learned from camera views
+    env = ArmEnv(goal_predictor=goal, camera=camera)
     ok, total = Counter(), Counter()
     for ep in range(episodes):
         obs, _ = env.reset(seed=10_000 + ep)  # fixed seeds: runs are comparable
@@ -82,11 +82,12 @@ def main():
     ap.add_argument("--eval", help="evaluate this .zip instead of training")
     ap.add_argument("--episodes", type=int, default=100)
     ap.add_argument("--tabpfn-goal", action="store_true", help="eval: agent uses TabPFN's predicted stop point")
+    ap.add_argument("--camera", action="store_true", help="eval: the arm sees the object with the depth camera")
     ap.add_argument("--goal-noise", help="train: add these predictor errors (.npy, from trajectory.py) to the stop point")
     args = ap.parse_args()
 
     if args.eval:
-        evaluate(args.eval, args.episodes, args.tabpfn_goal)
+        evaluate(args.eval, args.episodes, args.tabpfn_goal, args.camera)
         return
 
     env = make_vec_env(ArmEnv, n_envs=args.envs, vec_env_cls=SubprocVecEnv,

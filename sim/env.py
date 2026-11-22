@@ -21,6 +21,7 @@ from common import (
     ROUNDNESS, SYMMETRY, TRUE_DIMS, classify, mat_to_quat, nearest_equivalent, wrap_err,
 )
 from sim.build import ARM_JOINTS, grip_ctrl, load_model
+from sim.camera import DepthCamera, Tracker
 from sim.ik import SITE, hand_frame, solve
 
 RATE_HZ = 25.0
@@ -66,7 +67,7 @@ def wrist_angle(R):
 class ArmEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, goal_predictor=None, goal_noise=None, hold_predictor=None):
+    def __init__(self, goal_predictor=None, goal_noise=None, hold_predictor=None, camera=False):
         m = self.m = load_model()
         self.d = mujoco.MjData(m)
         self.ik_d = mujoco.MjData(m)  # kinematics-only copy for inverse kinematics
@@ -93,6 +94,7 @@ class ArmEnv(gym.Env):
         self.goal_predictor = goal_predictor  # (pos, vel, acc) -> (stop point, interval); see trajectory.py
         self.goal_noise = None if goal_noise is None else np.load(goal_noise)  # rows: distance left, error xyz
         self.hold_predictor = hold_predictor  # TabPFN classifier: P(hold) at first touch; see grasp_outcome.py
+        self.eye = DepthCamera(m) if camera else None  # camera=True: detection and TabPFN see the object in pixels
 
     # ------------------------------------------------------------------ helpers
     def _ik(self, pos, wrist):
@@ -246,6 +248,7 @@ class ArmEnv(gym.Env):
         self.prev_action = np.zeros(5)
         self.t_release, self.giver_hand_at_release = None, None
         self.hold_ps, self.regrasps, self.regrasp_until = [], 0, -1.0
+        self.tracker, self.cam_rng = Tracker(), np.random.default_rng(seed)  # own stream: same episode with/without camera
         self._update_giver(0.0)
         mujoco.mj_kinematics(m, d)
         self._update_state()
@@ -392,28 +395,36 @@ class ArmEnv(gym.Env):
         self.grasp_dist = float(np.linalg.norm(self.opos - grasp_point))
         to_hand = self.hand_pos - self.opos
         self.dist = float(np.linalg.norm(to_hand))
-        if (not self.detected and self.voice == "ready" and self.dist < DETECT_DIST
-                and float(self.ovel @ to_hand) > 0):
+        # what the arm knows about the object: the simulator's truth, or (camera=True) what the depth camera sees
+        t = self.k * self.dt
+        if self.eye is None:
+            self.seen = (self.opos, self.ovel, self.oacc)
+        elif self.weld_on and self.t_touch is None:  # after touch the fingers take over: no frames needed
+            self.tracker.add(t, self.eye.see(d, self.obj_body[self.obj], self.cam_rng, min(self.features[1:3]) / 2))  # radius from shape features
+            self.seen = self.tracker.estimate(t)
+        if (not self.detected and self.voice == "ready" and self.seen is not None
+                and np.linalg.norm(self.hand_pos - self.seen[0]) < DETECT_DIST
+                and float(self.seen[1] @ (self.hand_pos - self.seen[0])) > 0):
             self.detected = True
             self.predicted = classify(self.features)
             if self.goal_predictor is not None or self.goal_noise is not None:
-                self.G_seen = self.opos.copy()  # never the true point; where it is until the first look
+                self.G_seen = self.seen[0].copy()  # never the true point; where it is until the first look
         # where it will stop: TabPFN looks again every LOOK_EVERY s while it moves (position, velocity,
         # acceleration: the arc and the slow-down); in training, the true point + TabPFN's real error
-        t, moving = self.k * self.dt, float(np.linalg.norm(self.ovel)) >= 0.02
+        moving = self.seen is not None and float(np.linalg.norm(self.seen[1])) >= 0.02
         if (self.detected and self.weld_on and self.t_touch is None and moving and self.t_carrier0 is not None
                 and t - self.t_carrier0 >= 0.2 and t - self.t_look >= LOOK_EVERY - 1e-9):
             self.t_look, self.looks = t, self.looks + 1
             if self.goal_predictor is not None:
-                self.G_seen, self.G_range = self.goal_predictor(self.opos, self.ovel, self.oacc)
+                self.G_seen, self.G_range = self.goal_predictor(*self.seen)
                 self.G_pred = self.G_seen.copy()
             elif self.goal_noise is not None:
                 left = float(np.linalg.norm(self.G - self.opos))  # only to pick an error of the right size
                 near = np.flatnonzero(np.abs(self.goal_noise[:, 0] - left) < 0.05)
                 pool = near if len(near) else np.arange(len(self.goal_noise))
                 self.G_seen = self.G + self.goal_noise[self.np_random.choice(pool), 1:]
-        if self.detected and self.weld_on and self.t_touch is None and not moving and self.looks:
-            self.G_seen = self.opos.copy()  # stopped: seen, not predicted
+        if self.detected and self.weld_on and self.t_touch is None and not moving and self.looks and self.seen is not None:
+            self.G_seen = self.seen[0].copy()  # stopped: seen, not predicted
         self.werr = 0.0 if self.period is None else abs(wrap_err(self.wrist, self.q_star, self.period))
         self.total_f, self.finger_f = self.contact_forces()
         self.contact = self.total_f > 0.05

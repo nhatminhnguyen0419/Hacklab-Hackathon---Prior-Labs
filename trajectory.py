@@ -7,6 +7,7 @@ in the object's own direction of travel. Three TabPFN regressors predict the sto
 
   python trajectory.py --collect 1000     # log a row per look -> data/trajectory.csv (parallel)
   python trajectory.py                    # score on held-out episodes vs baselines
+  python trajectory.py --camera ...       # the same from the depth camera's view (sim/camera.py) -> *_camera files
 
 From other code:
   from trajectory import load_predictor
@@ -24,6 +25,7 @@ import pandas as pd
 
 DATA = "data/trajectory.csv"
 RESIDUALS = "data/trajectory_residuals.npy"
+CAMERA_DATA, CAMERA_RESIDUALS = "data/trajectory_camera.csv", "data/trajectory_camera_residuals.npy"
 REACH_CENTER = np.array([0.0, -0.22, 1.40])  # the shoulder: hand-overs happen on a shell around it (sim/env.py)
 ARM_LENGTH = 0.48  # m, typical hand-over distance from the shoulder
 FEATURES = ["px", "py", "pz", "speed", "ux", "uy", "uz", "a_ahead", "a_side", "a_up", "s_shell", "s_brake"]
@@ -57,9 +59,9 @@ def features(p, v, a):
 _worker = {}
 
 
-def _init():
+def _init(camera=False):
     from sim.env import ArmEnv
-    _worker["env"] = ArmEnv()
+    _worker["env"] = ArmEnv(camera=camera)
 
 
 def _episode(seed):
@@ -71,19 +73,19 @@ def _episode(seed):
         env.step(env.expert_action())
         t = env.k * env.dt
         if (env.detected and env.weld_on and env.t_touch is None and t >= 0.2 and env.k % LOOK_STEPS == 0
-                and np.linalg.norm(env.ovel) >= 0.02):
-            off = frame(env.ovel).T @ (env.G - env.opos)
-            rows.append([seed, len(rows), *features(env.opos, env.ovel, env.oacc), *off,
+                and env.seen is not None and np.linalg.norm(env.seen[1]) >= 0.02):
+            p, v, a = env.seen  # what the arm knows: the truth, or the camera's estimate
+            rows.append([seed, len(rows), *features(p, v, a), *(frame(v).T @ (env.G - p)),
                          float(np.linalg.norm(env.G - env.opos)), *env.G])
         if env.t_touch is not None or not env.weld_on:
             break
     return rows
 
 
-def collect(n, out=DATA):
+def collect(n, out=DATA, camera=False):
     seeds = range(200_000, 200_000 + n)  # apart from every other seed range in the project
     start = time.time()
-    with Pool(max(1, (os.cpu_count() or 4) - 2), initializer=_init) as pool:
+    with Pool(max(1, (os.cpu_count() or 4) - 2), initializer=_init, initargs=(camera,)) as pool:
         rows = [r for ep in pool.imap_unordered(_episode, seeds, chunksize=8) for r in ep]
     df = pd.DataFrame(rows, columns=["seed", "look", *FEATURES, *TARGETS, "dist_left", "gx", "gy", "gz"])
     df = df.sort_values(["seed", "look"])
@@ -135,7 +137,7 @@ def load_predictor(path=DATA, n=LIVE_CONTEXT):
     return predict
 
 
-def evaluate(path=DATA, n_context=3000, n_test=1500):
+def evaluate(path=DATA, n_context=3000, n_test=1500, residuals=RESIDUALS):
     from sklearn.linear_model import LinearRegression
 
     df = pd.read_csv(path)
@@ -169,13 +171,15 @@ def evaluate(path=DATA, n_context=3000, n_test=1500):
     print(f"TabPFN 10-90% range of the distance ahead holds the truth {cover:.0%} of the time (ideal 80%), "
           f"mean width {np.mean(q[2] - q[0]) * 100:.0f} cm;  predict time {t_tab:.1f}s for {len(te)} looks x 3")
     resid = _to_world(X_te, tab) - G
-    np.save(RESIDUALS, np.column_stack([te.dist_left.to_numpy(), resid]))  # train.py --goal-noise
-    print(f"saved {len(resid)} held-out errors (with distance left) -> {RESIDUALS}")
+    np.save(residuals, np.column_stack([te.dist_left.to_numpy(), resid]))  # train.py --goal-noise
+    print(f"saved {len(resid)} held-out errors (with distance left) -> {residuals}")
     assert np.median(np.linalg.norm(resid, axis=1)) < 0.10, "stop point off by more than 10 cm - check the data"
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--collect", type=int, help="episodes to run and log")
+    ap.add_argument("--camera", action="store_true", help="the arm sees the object with the depth camera")
     args = ap.parse_args()
-    collect(args.collect) if args.collect else evaluate()
+    data, res = (CAMERA_DATA, CAMERA_RESIDUALS) if args.camera else (DATA, RESIDUALS)
+    collect(args.collect, data, args.camera) if args.collect else evaluate(data, residuals=res)

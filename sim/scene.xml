@@ -62,6 +62,8 @@
     <site name="reach_zone" type="box" pos="0.42 -0.26 1.18" size="0.08 0.17 0.12" rgba="0.2 1 0.4 0.08"/>
     <!-- TabPFN's predicted stop point (trajectory.py); parked below the floor until used -->
     <site name="goal_pred" type="sphere" size="0.022" pos="0 0 -5" rgba="1 0.3 0.75 0.75"/>
+    <!-- Depth camera worn at the user's head (like smart glasses), looking at the reach zone (sim/camera.py) -->
+    <camera name="eye" pos="0.08 -0.06 1.55" xyaxes="-0.412 -0.911 0 0.597 -0.270 0.755" fovy="60"/>
     <!-- Fixed camera for the web app's live image stream -->
     <camera name="demo" pos="0.95 -2.05 1.75" xyaxes="0.984 0.178 0 -0.060 0.331 0.942"/>
   </worldbody>
