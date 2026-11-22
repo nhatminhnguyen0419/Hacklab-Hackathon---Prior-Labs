@@ -1,6 +1,6 @@
 """
 Pitch demo video: title, how it works, real hand-overs with TabPFN's predictions filled in live
-beside the 3D view, results, closing. 1280x720, 25 fps, H.264 (needs ffmpeg on PATH).
+beside the 3D view, one hand-over seen through the depth camera (sim/camera.py), results, closing. 1280x720, 25 fps, H.264 (needs ffmpeg on PATH).
 
   python make_pitch_video.py          # -> demo_replays/pitch_demo.mp4 (about 75 s)
 """
@@ -18,7 +18,7 @@ from stable_baselines3 import PPO
 from classifier import load_classifier
 from grasp_outcome import load_predictor as load_hold
 from sim.env import RELEASE_ACTION, ArmEnv
-from trajectory import load_predictor as load_goal
+from trajectory import CAMERA_DATA, load_predictor as load_goal
 
 OUT = "demo_replays/pitch_demo.mp4"
 W, H, FPS = 1280, 720, 25
@@ -127,7 +127,8 @@ def run_episode(env, model, seed, ident_clf, renderer, title, render=True):
             caption = f"Detected. TabPFN identifies it: a {s['ident']}."
         if env.G_pred is not None and env.weld_on and env.t_touch is None:
             if s["goal"] is None:
-                caption = "TabPFN predicts where it will stop (pink), looking again every 0.2 s as it slows down."
+                caption = ("The camera finds it in pixels; TabPFN predicts where it will stop (pink)." if env.eye else
+                           "TabPFN predicts where it will stop (pink), looking again every 0.2 s as it slows down.")
             s["goal"] = (float(np.linalg.norm(env.G_pred - env.G)) * 100, (env.G_range[1] - env.G_range[0]) * 100,
                          env.looks)
         if len(env.hold_ps) > len(s["holds"]):  # the env asked TabPFN at a first touch
@@ -166,6 +167,13 @@ def run_episode(env, model, seed, ident_clf, renderer, title, render=True):
             d.text((30, 22), title, font=F["h3"], fill=TEXT)
             d.text((870 - d.textlength(f"t = {k / FPS:.1f} s", font=F["body"]), 26), f"t = {k / FPS:.1f} s",
                    font=F["body"], fill=MUTED)
+            if env.eye and (pic := env.eye.picture()) is not None:  # what the arm sees, bottom right of the view
+                pw, ph = 300, 225
+                x, y = 30 + 840 - pw - 14, 70 + 585 - ph - 14
+                d.rectangle((x - 3, y - 3, x + pw + 2, y + ph + 2), fill=PINK)
+                img.paste(Image.fromarray(pic).resize((pw, ph)), (x, y))
+                d.rectangle((x, y + ph - 26, x + pw, y + ph), fill=BG)
+                d.text((x + 8, y + ph - 25), "what the arm sees: depth, object in pink", font=F["label"], fill=TEXT)
             d.rectangle((30, 655, 870, 700), fill=CARD)
             d.text((44, 663), caption, font=F["body"], fill=TEXT)
             panel(img, s)
@@ -173,6 +181,14 @@ def run_episode(env, model, seed, ident_clf, renderer, title, render=True):
         if ((term or trunc) and not success) or (k_drop is not None and k - k_drop > 1.5 * FPS):
             break
     return frames, outcome, s["hold"]
+
+
+def pick_held_seed(env, model, first=61_000):
+    """First seed from `first` the arm holds cleanly (for the camera hand-over)."""
+    for seed in range(first, first + 40):
+        if run_episode(env, model, seed, None, None, "", render=False)[1] == "held":
+            return seed
+    raise RuntimeError("no clean camera hand-over found")
 
 
 def pick_seeds(env, model):
@@ -200,6 +216,9 @@ def main():
     good, risky = pick_seeds(env, model)
     print("seeds:", good, "saved by a re-grasp:", risky)
     renderer = mujoco.Renderer(env.m, 585, 840)
+    cam_env = ArmEnv(goal_predictor=load_goal(CAMERA_DATA), hold_predictor=load_hold(), camera=True)
+    cam_seed = pick_held_seed(cam_env, model)
+    print("camera seed:", cam_seed)
 
     frames = caption_frames([
         ("HackLab Berlin × TabPFN · Prior Labs track", "label", CYAN, 22),
@@ -224,10 +243,19 @@ def main():
         ep, _, _ = run_episode(env, model, seed, ident_clf, renderer, title)
         frames += ep
     frames += caption_frames([
+        ("NEXT STEP, ALREADY RUNNING", "label", CYAN, 22),
+        ("The arm sees the object with a depth camera.", "h2", TEXT, 30),
+        ("A camera worn at the user’s head, like smart glasses, gives a depth image 25 times a second.", "body", TEXT, 14),
+        ("The object’s pixels become a 3D position; a short curve fit gives its speed and slow-down.", "body", TEXT, 14),
+        ("TabPFN learned the camera’s errors in context: no training run.", "body", PINK, 0)], 5.5)
+    frames += run_episode(cam_env, model, cam_seed, ident_clf, mujoco.Renderer(cam_env.m, 585, 840),
+                          "Seen through the depth camera")[0]
+    frames += caption_frames([
         ("RESULTS · held-out tests the models never saw", "label", CYAN, 26),
         ("What is it?\t100% object identified  (hand-written rule: 98.3%)", "body", TEXT, 18),
         ("Where will it stop?\t0.8 cm median error, looking every 0.2 s  (linear regression: 3.6 cm)", "body", TEXT, 18),
-        ("Will it hold?\tROC AUC 0.961 at first touch  (logistic regression: 0.837)", "body", TEXT, 34),
+        ("Will it hold?\tROC AUC 0.961 at first touch  (logistic regression: 0.837)", "body", TEXT, 18),
+        ("Depth camera\t2.1 cm stop point from pixels (lin. regression: 4.6 cm), 81% grasps", "body", TEXT, 34),
         ("92%", "h1", GREEN, 2),
         ("grasp success: the arm acts on TabPFN’s predictions and re-grasps when it says “risky”", "body", TEXT, 6),
         ("(89% without the re-grasp; real contact physics, no assist; 200 held-out episodes)", "small", MUTED, 0)], 7)
