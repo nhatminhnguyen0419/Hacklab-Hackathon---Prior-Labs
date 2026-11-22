@@ -11,5 +11,4 @@ uvicorn
 websockets
 python-multipart
 pillow
-opencv-python
 pandas

@@ -1,12 +1,20 @@
 __pycache__/
 *.pyc
-# 173 MB, over GitHub's 100 MB limit; regenerate: python generate_dataset.py --episodes 3000 --out data/run1
+# 173 MB, over GitHub's 100 MB limit; made by the first simulator's generator (git history)
 data/run1_steps.csv
 # MuJoCo writes the harmless "keeping parent value" attach notices here
 MUJOCO_LOG.TXT
-# raw camera / voice recordings for make_final_video.py: personal, and can be large
+# raw camera / voice recordings for the submission video: personal, and can be large
 video_parts/
 # local dev configs
 .claude/
 # sim/build.py self-check output
 sim/preview.png
+# pitch/submission video tools and their output: kept locally, not part of the simulation repo
+demo_replays/
+docs/VIDEO_SCRIPT.md
+make_broll.py
+make_final_video.py
+make_pictures.py
+make_pitch_video.py
+record_demo.py
