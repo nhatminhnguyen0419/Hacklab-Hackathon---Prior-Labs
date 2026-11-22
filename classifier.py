@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 from tabpfn import TabPFNClassifier
 from tabpfn.constants import ModelVersion
 
-from generate_dataset import OBJECTS, classify
+from common import OBJECTS, classify
 
 FEATURES = ["feat_height", "feat_width", "feat_depth", "feat_elongation", "feat_roundness"]
 DATA = "data/run1_features.csv"

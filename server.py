@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from sim.env import FORCE_LIMIT, RELEASE_ACTION, STOP_ACTION, ArmEnv  # the new simulator
-from generate_dataset import EPISODE_COLUMNS, STEP_COLUMNS
+from common import EPISODE_COLUMNS, STEP_COLUMNS
 
 MODEL_PATH = "models/ppo_arm.zip"
 FPS = 25

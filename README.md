@@ -5,9 +5,15 @@ A simulated robot arm and hand for someone who has lost an arm at the shoulder. 
 
 Built at **HackLab Berlin × TabPFN** (Prior Labs track) by **The Big Gang**: Minh Nguyen, Quan Vo, Kazuki Dozono.
 
-| Real-physics grasps, no assist | The arm at human scale |
-|---|---|
-| ![All five objects held by the hand](sim/grasp_test.png) | ![The arm hanging from the shoulder](sim/preview.png) |
+![A person hands a bottle to the prosthetic arm](docs/images/hero.png)
+
+**One hand-over, step by step** (the pink dot is TabPFN's predicted stop point):
+
+![Four steps of a hand-over](docs/images/sequence.png)
+
+**All five objects held by contact physics alone, no grasp assist:**
+
+![The hand holding a cup, bottle, box, pen and ball](docs/images/grasps.png)
 
 ---
 
@@ -81,7 +87,7 @@ Open http://localhost:8000, press **New episode**, then **Ready** (or 🎤 Voice
 **Self-checks**
 
 ```bash
-python sim/build.py        # builds the model, renders sim/preview.png
+python sim/build.py        # builds the model, renders a preview image
 python sim/ik.py           # inverse kinematics reaches the handshake pose
 python -m sim.env          # Gymnasium API check, random episode, expert success, speed
 ```
@@ -137,9 +143,10 @@ python record_demo.py --n 5 --rl
 | `record_demo.py` | Records MP4 replays with the predicted-stop marker |
 | `make_pitch_video.py` | Renders the pitch video `demo_replays/pitch_demo.mp4` (needs ffmpeg) |
 | `docs/VIDEO_SCRIPT.md`, `make_broll.py`, `make_final_video.py` | The 3-minute submission video: timed script, 2:20 of footage, and the tool that stitches in the team's camera clips and voice-over |
+| `make_pictures.py` | Renders the README pictures in `docs/images/` |
 | `regrasp_eval.py` | Measures the re-grasp reflex: the same episodes with it off and on |
-| `generate_dataset.py` | Shared constants, reward weights and the object rule |
-| `models/ppo_arm.zip` | The trained agent used by the web app (`models/v3/` has the full run) |
+| `common.py` | Shared definitions: objects, the rule classifier, reward weights, dataset CSV columns |
+| `models/ppo_arm.zip` | The trained agent used by the web app (`models/v3/` has the imitation model and the training log) |
 | `data/` | Logged rows for the TabPFN models |
 
 ## Limitations
@@ -149,7 +156,7 @@ python record_demo.py --n 5 --rl
 - The 7-joint arm’s elbow sometimes swings out sideways.
 - The live view runs at about 0.7× real time on a laptop CPU, because the arm waits for each TabPFN look (shadows are off in the live stream; recorded videos keep them).
 - “Held” means the object is in finger contact and within 10 cm of the grasp point; the cup is the hardest object (about 75–80%).
-- `data/run1_*` and the per-step dataset generator in `generate_dataset.py` come from our first, homemade simulator. The object classifier still uses `data/run1_features.csv`, but the generator needs porting to `sim/` before it can produce new per-step datasets. `data/run1_steps.csv` (173 MB) is not in the repo.
+- `data/run1_*` come from our first, homemade simulator (in the git history): the object classifier still learns from `data/run1_features.csv` (shape features don't depend on the simulator), and `data/run1_episodes.csv` is a sample for the web app’s CSV upload. A per-step dataset export for the new simulator is not written yet.
 
 ## Credits and licences
 

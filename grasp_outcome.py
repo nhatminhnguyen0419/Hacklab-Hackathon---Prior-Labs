@@ -23,7 +23,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from generate_dataset import OBJECTS
+from common import OBJECTS
 
 DATA = "data/grasp_touch.csv"
 FEATURES = ["object", "wrist_err_deg", "grasp_dist", "total_force", "finger_force", "grip_angle",

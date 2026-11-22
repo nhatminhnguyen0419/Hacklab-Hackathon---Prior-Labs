@@ -21,7 +21,7 @@ from tabpfn.constants import ModelVersion
 from tabpfn_extensions.unsupervised import TabPFNUnsupervisedModel
 
 from classifier import DATA, FEATURES
-from generate_dataset import OBJECTS
+from common import OBJECTS
 
 CONTEXT = 500  # real rows TabPFN learns from; more is slower on CPU (see classifier.py)
 

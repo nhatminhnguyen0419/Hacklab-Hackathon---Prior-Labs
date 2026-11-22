@@ -6,3 +6,7 @@ data/run1_steps.csv
 MUJOCO_LOG.TXT
 # raw camera / voice recordings for make_final_video.py: personal, and can be large
 video_parts/
+# local dev configs
+.claude/
+# sim/build.py self-check output
+sim/preview.png

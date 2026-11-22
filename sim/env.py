@@ -16,7 +16,7 @@ import gymnasium as gym
 import mujoco
 import numpy as np
 
-from generate_dataset import (
+from common import (
     ALIGN_TOL, DETECT_DIST, GRASP_RADIUS, HOLD_TIME_FOR_SUCCESS, MAX_EPISODE_TIME, OBJECTS, REWARD,
     ROUNDNESS, SYMMETRY, TRUE_DIMS, classify, mat_to_quat, nearest_equivalent, wrap_err,
 )
@@ -48,7 +48,7 @@ SUCCESS_BONUS = 200.0
 STOP_ACTION = np.zeros(5, np.float32)                          # "stop": freeze everything
 RELEASE_ACTION = np.array([0, 0, 0, 0, -1.0], np.float32)      # "release": open the hand, keep the arm still
 VOICES = ["idle", "ready", "stop"]
-# Where the object sits in the hand frame when held (measured: sim/grasp_test.png): along the palm
+# Where the object sits in the hand frame when held (measured in a grasp test; see docs/images/grasps.png): along the palm
 # normal (x) and the fingers (z), from the hand's grasp site
 HOLD_OFFSET = {o: np.array([-0.015 if o == "pen" else 0.0, 0.0, -0.03]) for o in OBJECTS}
 # Object orientation in the hand frame when held: long axis across the palm (hand y)
@@ -304,7 +304,7 @@ class ArmEnv(gym.Env):
         if self.held:
             self.held_time += self.dt
 
-        # reward: same terms and weights as the old env (generate_dataset.REWARD)
+        # reward: same terms and weights as the old env (common.REWARD)
         r = 0.0
         if self.voice == "ready":
             arriving = self.t_carrier0 is not None and t - self.t_carrier0 < self.travel_time
