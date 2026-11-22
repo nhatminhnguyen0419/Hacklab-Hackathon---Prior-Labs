@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 from stable_baselines3 import PPO
 
 from classifier import load_classifier
-from grasp_outcome import load_predictor as load_hold, touch_features
+from grasp_outcome import load_predictor as load_hold
 from sim.env import RELEASE_ACTION, ArmEnv
 from trajectory import load_predictor as load_goal
 
@@ -80,7 +80,7 @@ def panel(img, s):
     t = box("2  WHERE WILL IT STOP?", "TabPFN", 104)
     if s["goal"]:
         d.text((x0 + 18, t), f"{s['goal'][0]:.1f} cm off", font=F["h3"], fill=TEXT)
-        d.text((x0 + 18, t + 34), f"range {s['goal'][1]:.0f} cm · pink dot in view", font=F["small"], fill=MUTED)
+        d.text((x0 + 18, t + 34), f"look {s['goal'][2]} · range {s['goal'][1]:.0f} cm · pink dot", font=F["small"], fill=MUTED)
     else:
         d.text((x0 + 18, t), "—", font=F["h3"], fill=MUTED)
     t = box("3  WILL IT HOLD?", "TabPFN", 104)
@@ -97,12 +97,13 @@ def panel(img, s):
     d.text((x0 + 18, t), s["result"], font=F["h3"], fill=s["result_col"])
 
 
-def run_episode(env, model, seed, ident_clf, hold_clf, renderer, title, render=True):
-    """Play one episode; return (frames, outcome, hold chance), outcome "held" / "dropped" / "misaligned" /
-    "missed". Frames only if render. A drop ends the clip 1.5 s later instead of at the 8 s timeout."""
+def run_episode(env, model, seed, ident_clf, renderer, title, render=True):
+    """Play one episode; return (frames, outcome, hold chance), outcome "held" / "saved" (held after a
+    re-grasp) / "dropped" / "misaligned" / "missed". Frames only if render. A drop ends the clip 1.5 s later instead of at the 8 s timeout."""
     marker = env.m.site("goal_pred").id
     obs, _ = env.reset(seed=seed)
-    s = {"voice": "idle", "ident": None, "goal": None, "hold": None, "result": "waiting", "result_col": MUTED}
+    s = {"voice": "idle", "ident": None, "goal": None, "hold": None, "holds": [], "result": "waiting",
+         "result_col": MUTED}
     frames, success, released, caption = [], False, 0, "The arm waits. Nothing moves until the user says “ready”."
     outcome, k_drop = "missed", None
     for k in range(env.n_steps + FPS * 2):
@@ -124,19 +125,30 @@ def run_episode(env, model, seed, ident_clf, hold_clf, renderer, title, render=T
         if env.detected and s["ident"] is None:
             s["ident"] = str(ident_clf.predict([list(env.features)])[0]) if render else env.predicted
             caption = f"Detected. TabPFN identifies it: a {s['ident']}."
-        if env.G_pred is not None and s["goal"] is None:
-            s["goal"] = (float(np.linalg.norm(env.G_pred - env.G)) * 100, (env.G_range[1] - env.G_range[0]) * 100)
-            caption = "From one look, TabPFN predicts where it will stop (pink). The RL agent moves the hand there."
-        if env.t_touch is not None and s["hold"] is None:
-            s["hold"] = float(hold_clf.predict_proba([touch_features(env)])[0, 1])
-            caption = "First touch: TabPFN predicts whether this grasp will hold."
-            s["result"], s["result_col"] = "grasping…", AMBER
-        if env.detected and env.t_touch is None and not success:
+        if env.G_pred is not None and env.weld_on and env.t_touch is None:
+            if s["goal"] is None:
+                caption = "TabPFN predicts where it will stop (pink), looking again every 0.2 s as it slows down."
+            s["goal"] = (float(np.linalg.norm(env.G_pred - env.G)) * 100, (env.G_range[1] - env.G_range[0]) * 100,
+                         env.looks)
+        if len(env.hold_ps) > len(s["holds"]):  # the env asked TabPFN at a first touch
+            s["holds"] = list(env.hold_ps)
+            s["hold"] = s["holds"][-1]
+            if env.regrasps and len(s["holds"]) == 1:
+                caption = f"TabPFN: only {s['hold'] * 100:.0f}% chance it holds. The hand opens and grasps again."
+                s["result"], s["result_col"] = "re-grasping…", AMBER
+            elif env.regrasps:
+                caption = f"Second grasp: TabPFN now gives it {s['hold'] * 100:.0f}%."
+                s["result"], s["result_col"] = "grasping…", AMBER
+            else:
+                caption = "First touch: TabPFN predicts whether this grasp will hold."
+                s["result"], s["result_col"] = "grasping…", AMBER
+        if env.detected and env.t_touch is None and not success and not s["holds"]:
             s["result"], s["result_col"] = "reaching…", AMBER
         if term and info["success"] and not success:
-            success, outcome = True, "held"
+            success, outcome = True, "saved" if env.regrasps else "held"
             s["result"], s["result_col"] = "held · real physics", GREEN
-            caption = "Held by contact physics alone: no grasp assist."
+            caption = ("Held after the re-grasp: TabPFN’s warning saved it." if env.regrasps
+                       else "Held by contact physics alone: no grasp assist.")
         if term and not info["success"]:
             outcome = "misaligned"
             s["result"], s["result_col"] = "held, wrist misaligned", RED
@@ -163,18 +175,18 @@ def run_episode(env, model, seed, ident_clf, hold_clf, renderer, title, render=T
     return frames, outcome, s["hold"]
 
 
-def pick_seeds(env, model, hold_clf):
-    """Successful hand-overs of bottle, cup, pen, ball; and a drop TabPFN called risky beforehand."""
+def pick_seeds(env, model):
+    """Clean hand-overs of bottle, cup, pen, ball; and one TabPFN called risky that the re-grasp saved."""
     want, picks, risky = ["bottle", "cup", "pen", "ball"], {}, None
-    for seed in range(60_000, 60_400):
+    for seed in range(60_000, 60_600):
         env.reset(seed=seed)
         obj = env.obj
         if obj in picks and risky is not None:
             continue
-        _, outcome, hold = run_episode(env, model, seed, None, hold_clf, None, "", render=False)
+        _, outcome, _ = run_episode(env, model, seed, None, None, "", render=False)
         if outcome == "held" and obj in want and obj not in picks:
             picks[obj] = seed
-        if outcome == "dropped" and risky is None and hold is not None and hold < 0.5:
+        if outcome == "saved" and risky is None:
             risky = seed
         if len(picks) == len(want) and risky is not None:
             break
@@ -183,10 +195,10 @@ def pick_seeds(env, model, hold_clf):
 
 def main():
     model = PPO.load("models/ppo_arm.zip", device="cpu")
-    env = ArmEnv(goal_predictor=load_goal())
-    hold_clf, ident_clf = load_hold(), load_classifier(fast=True)
-    good, risky = pick_seeds(env, model, hold_clf)
-    print("seeds:", good, "risky drop:", risky)
+    env = ArmEnv(goal_predictor=load_goal(), hold_predictor=load_hold())  # re-grasps when TabPFN says risky
+    ident_clf = load_classifier(fast=True)
+    good, risky = pick_seeds(env, model)
+    print("seeds:", good, "saved by a re-grasp:", risky)
     renderer = mujoco.Renderer(env.m, 585, 840)
 
     frames = caption_frames([
@@ -199,9 +211,9 @@ def main():
         ("HOW IT WORKS", "label", CYAN, 22),
         ("Someone hands an object to a person with a prosthetic arm.", "h2", TEXT, 30),
         ("1   The user says “ready”: nothing moves before that.", "body", TEXT, 14),
-        ("2   TabPFN: what is it?  Where will it stop?", "body", PINK, 14),
+        ("2   TabPFN: what is it?  Where will it stop? (it looks again every 0.2 s)", "body", PINK, 14),
         ("3   An RL agent moves a Kinova Gen3 arm and turns the wrist to suit the object.", "body", TEXT, 14),
-        ("4   At first touch, TabPFN: will this grasp hold?", "body", PINK, 14),
+        ("4   At first touch, TabPFN: will this grasp hold? If it says “risky”, the hand re-grasps.", "body", PINK, 14),
         ("5   The TetherIA Aero Hand holds it by real contact physics. “Release” opens it.", "body", TEXT, 30),
         ("Every step, detection and grasp is a row of a table; TabPFN learns from past rows in context.", "small", MUTED, 0)],
         6.5)
@@ -209,19 +221,19 @@ def main():
     if risky is not None:
         episodes.append((risky, "When TabPFN says “risky”"))
     for seed, title in episodes:
-        ep, _, _ = run_episode(env, model, seed, ident_clf, hold_clf, renderer, title)
+        ep, _, _ = run_episode(env, model, seed, ident_clf, renderer, title)
         frames += ep
     frames += caption_frames([
         ("RESULTS · held-out tests the models never saw", "label", CYAN, 26),
         ("What is it?\t100% object identified  (hand-written rule: 98.3%)", "body", TEXT, 18),
-        ("Where will it stop?\t2.6 cm median error from one look;  10–90% range covers 79%", "body", TEXT, 18),
-        ("Will it hold?\tROC AUC 0.945 at first touch  (logistic regression: 0.795)", "body", TEXT, 34),
-        ("84.5%", "h1", GREEN, 2),
-        ("grasp success, the arm acting on TabPFN’s predictions, real contact physics, no assist", "body", TEXT, 6),
-        ("(87.5% when given the simulator’s true stop point; 200 held-out episodes)", "small", MUTED, 0)], 7)
+        ("Where will it stop?\t0.8 cm median error, looking every 0.2 s  (linear regression: 3.6 cm)", "body", TEXT, 18),
+        ("Will it hold?\tROC AUC 0.961 at first touch  (logistic regression: 0.837)", "body", TEXT, 34),
+        ("92%", "h1", GREEN, 2),
+        ("grasp success: the arm acts on TabPFN’s predictions and re-grasps when it says “risky”", "body", TEXT, 6),
+        ("(89% without the re-grasp; real contact physics, no assist; 200 held-out episodes)", "small", MUTED, 0)], 7)
     frames += caption_frames([
         ("HOW FAR CAN A TABLE TAKE A ROBOT?", "label", CYAN, 22),
-        ("From one look to a real grasp,", "h1", TEXT, 4), ("84.5% of the time.", "h1", TEXT, 46),
+        ("From a moving object to a real grasp,", "h1", TEXT, 4), ("92% of the time.", "h1", TEXT, 46),
         ("github.com/nhatminhnguyen0419/Hacklab-Hackathon---Prior-Labs", "body", CYAN, 12),
         ("The Big Gang · Minh Nguyen, Quan Vo, Kazuki Dozono", "body", TEXT, 0)], 5)
 

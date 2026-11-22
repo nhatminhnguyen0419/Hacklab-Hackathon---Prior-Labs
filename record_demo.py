@@ -40,7 +40,8 @@ def main():
     except Exception as e:
         print(f"no TabPFN stop-point prediction ({type(e).__name__}); using the simulator's")
         goal = None
-    env = ArmEnv(goal_predictor=goal)
+    from grasp_outcome import load_predictor as load_hold
+    env = ArmEnv(goal_predictor=goal, hold_predictor=load_hold())  # re-grasps when TabPFN says "risky"
     marker = env.m.site("goal_pred").id
     renderer = mujoco.Renderer(env.m, 480, 640)
     kept, seen = 0, set()

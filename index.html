@@ -289,13 +289,17 @@ function showState(s) {
   $("r-force").className = "value num " + (s.max_force > (s.force_limit || 20) ? "warn" : "");
   $("r-voice").textContent = s.voice;
   $("r-goal").innerHTML = s.goal_err_cm != null
-    ? `${s.goal_err_cm} cm <span class="sub">from the real stop point · range ${s.goal_range_cm} cm` +
+    ? `${s.goal_err_cm} cm <span class="sub">from the real stop point · look ${s.looks} · range ${s.goal_range_cm} cm` +
       (s.arrive_in > 0 ? ` · arrives in ${s.arrive_in} s` : " · arrived") + "</span>"
     : `– <span class="sub">${s.traj_model === "ready" ? "waiting for detection" : "model " + s.traj_model}</span>`;
   const p = s.hold_p;
   $("hold-fill").style.width = p == null ? "0" : `${(p * 100).toFixed(0)}%`;
   $("hold-fill").className = "pfill" + (p != null && p < 0.5 ? " low" : "");
-  $("r-hold").innerHTML = p != null ? `${(p * 100).toFixed(0)}% <span class="sub">chance of a stable hold</span>`
+  const pct = x => `${(x * 100).toFixed(0)}%`;
+  $("r-hold").innerHTML = p != null && s.regrasps
+    ? `${pct(s.hold_first)} → ${s.hold_after != null ? "re-grasped → " + pct(s.hold_after) : "re-grasping…"}` +
+      ` <span class="sub">TabPFN called it risky; the hand tried again</span>`
+    : p != null ? `${pct(p)} <span class="sub">chance of a stable hold</span>`
     : s.time_to_grasp != null ? "predicting…"
     : `– <span class="sub">${s.grasp_model === "ready" ? "waiting for first touch" : "model " + s.grasp_model}</span>`;
   $("r-ctrl").textContent = s.controller;

@@ -28,7 +28,6 @@ from PIL import Image
 
 from sim.env import FORCE_LIMIT, RELEASE_ACTION, STOP_ACTION, ArmEnv  # the new simulator
 from generate_dataset import EPISODE_COLUMNS, STEP_COLUMNS
-from grasp_outcome import touch_features
 
 MODEL_PATH = "models/ppo_arm.zip"
 FPS = 25
@@ -164,7 +163,8 @@ async def sim_socket(ws: WebSocket):
 
 
 async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
-    env.goal_predictor = traj["predict"]
+    env.goal_predictor = traj["predict"]  # ~0.1 s per look, waited for: a stale answer misled the agent
+    env.hold_predictor = grasp["clf"]  # the env asks at first touch and re-grasps if TabPFN says it is risky
     obs, _ = env.reset(seed=time.time_ns() % 2**31, options={"live": True})  # ns: two episodes in one second differ
     marker = env.m.site("goal_pred").id
     env.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
@@ -176,10 +176,6 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             pred = await asyncio.to_thread(tabpfn["clf"].predict, [list(env.features)])
             ident["name"], ident["by"] = str(pred[0]), "TabPFN-3.5"
     asyncio.create_task(identify())
-    hold = {"p": None, "asked": False}
-
-    async def predict_hold(row):
-        hold["p"] = float(await asyncio.to_thread(lambda: grasp["clf"].predict_proba([row])[0, 1]))
 
     for k in range(MAX_LIVE_SECONDS * FPS):
         t0 = time.perf_counter()
@@ -194,14 +190,11 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             t_release = t_release or k / FPS
         else:
             action = policy(env, obs)
-        obs, _, terminated, _, info = env.step(action)
+        obs, _, terminated, _, info = await asyncio.to_thread(env.step, action)  # TabPFN may take 0.1 s: keep the socket alive
         if not env.weld_on:  # the hand's own grip, after the person lets go (their push at hand-over peaks 300-500 N)
             max_force = max(max_force, env.total_f)
         if env.G_range is not None:
             env.m.site_pos[marker] = env.G_pred
-        if env.t_touch is not None and not hold["asked"] and grasp["clf"] is not None:
-            hold["asked"] = True  # the row is taken now, at first touch; the answer arrives ~0.1 s later
-            asyncio.create_task(predict_hold(touch_features(env)))
         if terminated and info["success"] and not success:  # a 1 s hold with the wrist misaligned is not a success
             success, t_success = True, k / FPS
 
@@ -222,7 +215,9 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             "time_to_grasp": None if env.t_touch is None or env.t_carrier0 is None
             else round(env.t_touch - env.t_carrier0, 2),
             "max_force": round(max_force, 1), "force_limit": FORCE_LIMIT,
-            "hold_p": None if hold["p"] is None else round(hold["p"], 3), "grasp_model": grasp["status"],
+            "hold_p": round(env.hold_ps[-1], 3) if env.hold_ps else None, "grasp_model": grasp["status"],
+            "hold_first": round(env.hold_ps[0], 3) if env.hold_ps else None, "regrasps": env.regrasps, "looks": env.looks,
+            "hold_after": round(env.hold_ps[1], 3) if len(env.hold_ps) > 1 else None,
             # stop point: TabPFN's guess vs where the object really stops (the simulator knows), and the 10-90% range
             "goal_err_cm": None if env.G_range is None else round(100 * float(np.linalg.norm(env.G_pred - env.G)), 1),
             "goal_range_cm": None if env.G_range is None else round(100 * (env.G_range[1] - env.G_range[0]), 1),

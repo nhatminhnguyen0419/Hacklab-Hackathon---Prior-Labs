@@ -17,7 +17,7 @@ import mujoco
 import numpy as np
 
 from generate_dataset import (
-    ALIGN_TOL, DETECT_DIST, HOLD_TIME_FOR_SUCCESS, MAX_EPISODE_TIME, OBJECTS, REWARD,
+    ALIGN_TOL, DETECT_DIST, GRASP_RADIUS, HOLD_TIME_FOR_SUCCESS, MAX_EPISODE_TIME, OBJECTS, REWARD,
     ROUNDNESS, SYMMETRY, TRUE_DIMS, classify, mat_to_quat, nearest_equivalent, wrap_err,
 )
 from sim.build import ARM_JOINTS, grip_ctrl, load_model
@@ -32,7 +32,11 @@ MAX_WRIST = 3.0                  # rad/s
 MAX_GRIP = 3.0                   # grip units (0 open .. 1 closed) per s (2.0 / 1.5 tested: fewer successes, more force)
 WRIST_RANGE = (-1.6, 1.6)        # rad, wrist turn the targets may ask for
 WORKSPACE = (np.array([0.05, -0.55, 0.75]), np.array([0.62, 0.10, 1.45]))  # hand target box (m)
-LET_GO_GRIP = 0.6                # the person lets go once the hand is this closed on the object...
+REGRASP_BELOW = 0.5              # TabPFN hold chance under this at first touch: open and grasp again...
+MAX_REGRASPS = 1                 # ...at most this often...
+REGRASP_TIME = 0.4               # s ...the hand staying open this long while the person keeps holding
+LOOK_EVERY = 0.2                 # s, TabPFN re-predicts the stop point this often while the object moves
+LET_GO_GRIP = 0.6               # the person lets go once the hand is this closed on the object...
 LET_GO_DELAY = 0.15              # ...for this long after the fingers first touch it. Tested and dropped (100 fresh
                                  # episodes): waiting for the fingers to settle (82 vs 81 %, more force); the person
                                  # stopping pushing at first touch (66 %: pressing it into the palm helps the grasp)
@@ -62,7 +66,7 @@ def wrist_angle(R):
 class ArmEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, goal_predictor=None, goal_noise=None):
+    def __init__(self, goal_predictor=None, goal_noise=None, hold_predictor=None):
         m = self.m = load_model()
         self.d = mujoco.MjData(m)
         self.ik_d = mujoco.MjData(m)  # kinematics-only copy for inverse kinematics
@@ -86,8 +90,9 @@ class ArmEnv(gym.Env):
                                                                  ("index", "middle", "ring", "pinky", "thumb"))}
         self.action_space = gym.spaces.Box(-1.0, 1.0, (5,), np.float32)
         self.observation_space = gym.spaces.Box(-np.inf, np.inf, (OBS_SIZE,), np.float32)
-        self.goal_predictor = goal_predictor  # (pos, vel) -> (stop point, interval); see trajectory.py
-        self.goal_noise = None if goal_noise is None else np.load(goal_noise)
+        self.goal_predictor = goal_predictor  # (pos, vel, acc) -> (stop point, interval); see trajectory.py
+        self.goal_noise = None if goal_noise is None else np.load(goal_noise)  # rows: distance left, error xyz
+        self.hold_predictor = hold_predictor  # TabPFN classifier: P(hold) at first touch; see grasp_outcome.py
 
     # ------------------------------------------------------------------ helpers
     def _ik(self, pos, wrist):
@@ -106,6 +111,51 @@ class ArmEnv(gym.Env):
         """Object position and rotation when held by a hand at (hand_pos, hand_R)."""
         A = A_BOX if obj == "box" else A_LONG
         return hand_pos + hand_R @ HOLD_OFFSET[obj], hand_R @ A
+
+    def _update_giver(self, t):
+        """Pose the visual person: hand behind the object (or pulling back after letting go), torso
+        following at arm's reach, elbow from two-segment arm geometry."""
+        m, d = self.m, self.d
+        obj = self.carrier_at(t) if self.weld_on else self.giver_hand_at_release
+        back = self.S - self.G
+        back[2] = 0.0
+        back /= max(np.linalg.norm(back), 1e-9)
+        hand = obj + back * (GRASP_RADIUS[self.obj] + 0.035)
+        if not self.weld_on:  # let go: the hand withdraws
+            hand = hand + back * min(0.25, 0.8 * (t - self.t_release))
+        torso = np.array([hand[0], hand[1], 1.15]) + back * 0.42
+        side = np.cross([0.0, 0.0, 1.0], back)
+        shoulder = torso + [0, 0, 0.21] + side * 0.17
+        L1, L2 = 0.30, 0.28
+        v = hand - shoulder
+        dist = float(np.clip(np.linalg.norm(v), 0.05, L1 + L2 - 1e-3))
+        n = v / max(np.linalg.norm(v), 1e-9)
+        hand = shoulder + n * dist
+        a = (L1 * L1 - L2 * L2 + dist * dist) / (2 * dist)
+        pole = np.array([0.0, 0.0, -1.0]) + 0.5 * side
+        pole -= (pole @ n) * n
+        elbow = shoulder + a * n + np.sqrt(max(L1 * L1 - a * a, 0.0)) * pole / max(np.linalg.norm(pole), 1e-9)
+        yaw = np.zeros(4)
+        mujoco.mju_axisAngle2Quat(yaw, [0.0, 0.0, 1.0], math.atan2(-back[1], -back[0]))
+        poses = {"giver_torso": (torso, yaw), "giver_upper": ((shoulder + elbow) / 2, elbow - shoulder),
+                 "giver_fore": ((elbow + hand) / 2, hand - elbow), "giver_hand": (hand, yaw)}
+        for name, (pos, rot) in poses.items():
+            mid = m.body_mocapid[m.body(name).id]
+            d.mocap_pos[mid] = pos
+            if len(rot) == 3:  # a segment: capsule z axis along it
+                q = np.zeros(4)
+                mujoco.mju_quatZ2Vec(q, rot)
+                rot = q
+            d.mocap_quat[mid] = rot
+
+    def carrier_at(self, t):
+        """Where the person's hand holds the object at time t: a quadratic arc S -> C -> G, timed by a
+        minimum-jerk profile (how people move: smooth start, smooth slow-down before stopping)."""
+        if self.t_carrier0 is None:  # live mode before "ready": still at the start
+            return self.S
+        tau = min(1.0, max(0.0, (t - self.t_carrier0) / self.travel_time))
+        u = tau ** 3 * (10 - 15 * tau + 6 * tau * tau)
+        return (1 - u) ** 2 * self.S + 2 * (1 - u) * u * self.C + u * u * self.G
 
     def sensor(self, name):
         return self.d.sensor(name).data.copy()
@@ -153,7 +203,11 @@ class ArmEnv(gym.Env):
         direction = 0.8 * np.array([1.0, 0.0, 0.0]) + 0.6 * hR[:, 0] + rng.normal(0, 0.2, 3)
         direction /= np.linalg.norm(direction)
         self.S = self.G + direction * rng.uniform(0.4, 0.7)
-        self.travel_time = np.linalg.norm(self.G - self.S) / rng.uniform(0.15, 0.35)
+        # a person's hand-over: an arc (lifted, swung a little sideways) that slows down smoothly at the end
+        side = np.cross(self.G - self.S, [0.0, 0.0, 1.0])
+        side /= max(np.linalg.norm(side), 1e-9)
+        self.C = (self.S + self.G) / 2 + [0, 0, rng.uniform(0.03, 0.18)] + side * rng.uniform(-0.12, 0.12)
+        self.travel_time = 1.4 * np.linalg.norm(self.G - self.S) / rng.uniform(0.15, 0.35)
         self.qa = self.obj_q[obj]
         d.qpos[self.qa:self.qa + 3] = self.S
         d.qpos[self.qa + 3:self.qa + 7] = quat
@@ -176,6 +230,7 @@ class ArmEnv(gym.Env):
         self.t_carrier0 = None if self.live else 0.0
 
         self.G_seen, self.G_range, self.G_pred = self.G, None, None
+        self.t_look, self.looks = -1e9, 0
         self.k = 0
         self.detected = False
         self.predicted = ""
@@ -189,6 +244,10 @@ class ArmEnv(gym.Env):
         self.expert_closing = False
         self.voice = "idle"
         self.prev_action = np.zeros(5)
+        self.t_release, self.giver_hand_at_release = None, None
+        self.hold_ps, self.regrasps, self.regrasp_until = [], 0, -1.0
+        self._update_giver(0.0)
+        mujoco.mj_kinematics(m, d)
         self._update_state()
         return self._obs(), {}
 
@@ -197,12 +256,14 @@ class ArmEnv(gym.Env):
         m, d = self.m, self.d
         t = self.k * self.dt
         if self.weld_on and self.t_carrier0 is not None:
-            frac = min(1.0, (t - self.t_carrier0) / self.travel_time)
-            d.mocap_pos[self.carrier] = self.S + (self.G - self.S) * frac
+            d.mocap_pos[self.carrier] = self.carrier_at(t)
+        self._update_giver(t)
 
         a = np.clip(np.asarray(action, dtype=float), -1, 1)
         self.p_cmd = np.clip(self.p_cmd + a[:3] * MAX_VEL * self.dt, *WORKSPACE)
         self.w_cmd = float(np.clip(self.w_cmd + a[3] * MAX_WRIST * self.dt, *WRIST_RANGE))
+        if t < self.regrasp_until:  # re-grasp reflex: the hand opens while the person keeps holding it
+            a[4] = -1.0
         self.grip = float(np.clip(self.grip + a[4] * MAX_GRIP * self.dt, 0.0, 1.0))
         self.q_cmd = self._ik(self.p_cmd, self.w_cmd)
         self._set_ctrl(self.grip)
@@ -222,13 +283,22 @@ class ArmEnv(gym.Env):
         self._update_state()
 
         # hand-over: the person lets go once the hand has closed on the object for a moment
-        if self.weld_on and self.t_touch is None and self.finger_f > 0.2:
+        if self.weld_on and self.t_touch is None and self.finger_f > 0.2 and t >= self.regrasp_until:
             self.t_touch = t
             self.err_at_touch = self.werr
+            if self.hold_predictor is not None:  # TabPFN: will this grasp hold? If not, open and try again
+                from grasp_outcome import touch_features
+                p = float(self.hold_predictor.predict_proba([touch_features(self)])[0, 1])
+                self.hold_ps.append(p)
+                if p < REGRASP_BELOW and self.regrasps < MAX_REGRASPS:
+                    self.regrasps += 1
+                    self.regrasp_until = t + REGRASP_TIME
+                    self.t_touch, self.expert_closing = None, False
         if (self.weld_on and self.t_touch is not None and t - self.t_touch >= LET_GO_DELAY
                 and self.grip >= LET_GO_GRIP and self.finger_f > 0.2):
             self.weld_on = False
             d.eq_active[self.weld[self.obj]] = 0
+            self.t_release, self.giver_hand_at_release = t, self.carrier_at(t)
 
         self.held = (not self.weld_on) and self.finger_f > 0.2 and self.grasp_dist < HELD_DIST
         if self.held:
@@ -309,7 +379,9 @@ class ArmEnv(gym.Env):
     def _update_state(self):
         d = self.d
         self.opos = d.qpos[self.qa:self.qa + 3].copy()
-        self.ovel = d.qvel[self.obj_v[self.obj]:self.obj_v[self.obj] + 3].copy()
+        vel = d.qvel[self.obj_v[self.obj]:self.obj_v[self.obj] + 3].copy()
+        self.oacc = (vel - self.ovel) / self.dt if self.k else np.zeros(3)
+        self.ovel = vel
         self.hand_pos = d.site_xpos[self.site].copy()
         self.hand_R = d.site_xmat[self.site].reshape(3, 3).copy()
         self.hand_vel = np.zeros(6)
@@ -324,16 +396,23 @@ class ArmEnv(gym.Env):
                 and float(self.ovel @ to_hand) > 0):
             self.detected = True
             self.predicted = classify(self.features)
+            if self.goal_predictor is not None or self.goal_noise is not None:
+                self.G_seen = self.opos.copy()  # never the true point; where it is until the first look
+        # where it will stop: TabPFN looks again every LOOK_EVERY s while it moves (position, velocity,
+        # acceleration: the arc and the slow-down); in training, the true point + TabPFN's real error
+        t, moving = self.k * self.dt, float(np.linalg.norm(self.ovel)) >= 0.02
+        if (self.detected and self.weld_on and self.t_touch is None and moving and self.t_carrier0 is not None
+                and t - self.t_carrier0 >= 0.2 and t - self.t_look >= LOOK_EVERY - 1e-9):
+            self.t_look, self.looks = t, self.looks + 1
             if self.goal_predictor is not None:
-                self.G_seen = self.opos.copy()
+                self.G_seen, self.G_range = self.goal_predictor(self.opos, self.ovel, self.oacc)
+                self.G_pred = self.G_seen.copy()
             elif self.goal_noise is not None:
-                self.G_seen = self.G + self.goal_noise[self.np_random.integers(len(self.goal_noise))]
-        if (self.detected and self.goal_predictor is not None and self.G_range is None
-                and self.t_carrier0 is not None and self.k * self.dt - self.t_carrier0 >= 0.2):
-            self.G_seen, self.G_range = self.goal_predictor(self.opos, self.ovel)
-            self.G_pred = self.G_seen.copy()
-        if (self.G_range is not None and self.weld_on and self.t_touch is None
-                and float(np.linalg.norm(self.ovel)) < 0.02):
+                left = float(np.linalg.norm(self.G - self.opos))  # only to pick an error of the right size
+                near = np.flatnonzero(np.abs(self.goal_noise[:, 0] - left) < 0.05)
+                pool = near if len(near) else np.arange(len(self.goal_noise))
+                self.G_seen = self.G + self.goal_noise[self.np_random.choice(pool), 1:]
+        if self.detected and self.weld_on and self.t_touch is None and not moving and self.looks:
             self.G_seen = self.opos.copy()  # stopped: seen, not predicted
         self.werr = 0.0 if self.period is None else abs(wrap_err(self.wrist, self.q_star, self.period))
         self.total_f, self.finger_f = self.contact_forces()
