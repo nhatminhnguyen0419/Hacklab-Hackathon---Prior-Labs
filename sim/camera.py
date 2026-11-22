@@ -43,6 +43,7 @@ class DepthCamera:
         self.r.disable_segmentation_rendering()
         ids = np.where(seg[..., 1] == mujoco.mjtObj.mjOBJ_GEOM, seg[..., 0], -1)  # other pixel types carry other ids
         mask = (ids >= 0) & (self.m.geom_bodyid[np.clip(ids, 0, self.m.ngeom - 1)] == body)
+        self.depth, self.mask = depth, mask  # last frame, for display (server.py)
         if mask.sum() < MIN_PIXELS:
             return None
         z = depth[mask] + rng.normal(0, DEPTH_NOISE, mask.sum()) * depth[mask] ** 2
@@ -50,6 +51,15 @@ class DepthCamera:
         c = pts.mean(axis=0)
         c += c / np.linalg.norm(c) * (2 / 3) * radius
         return d.cam_xpos[self.cam] + d.cam_xmat[self.cam].reshape(3, 3) @ c
+
+    def picture(self):
+        """Last frame as an RGB image: depth in grey (near = bright), the object's pixels in pink."""
+        if getattr(self, "depth", None) is None:
+            return None
+        g = (255 * np.clip((3.0 - self.depth) / 2.6, 0, 1)).astype(np.uint8)  # 0.4 m white .. 3 m black
+        img = np.repeat(g[..., None], 3, axis=2)
+        img[self.mask] = (255, 77, 191)
+        return img
 
     def close(self):
         self.r.close()

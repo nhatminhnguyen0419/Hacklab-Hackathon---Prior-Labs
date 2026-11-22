@@ -57,6 +57,13 @@
   .placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; pointer-events: none; }
   #view[src] + .placeholder { display: none; }
   #view:not([src]) { visibility: hidden; }  /* no broken-image icon before the first frame */
+  .eye { position: absolute; right: 12px; bottom: 12px; width: 32%; margin: 0; border-radius: 10px; overflow: hidden;
+         border: 1px solid rgba(255, 77, 191, .6); background: #000; box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
+  .eye img { display: block; width: 100%; aspect-ratio: 4/3; }
+  .eye figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 8px; font-size: 11px;
+                    background: rgba(0, 0, 0, .6); color: var(--text); }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .toggle input { width: 18px; height: 18px; accent-color: #ff4dbf; }
 
   /* pipeline */
   .steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 16px 0 4px; padding: 0; list-style: none; }
@@ -164,6 +171,10 @@
       <div class="placeholder">Press “New episode” to start the simulation</div>
       <span class="badge"><span class="dot live"></span>LIVE</span>
       <span class="badge time num" id="r-time">0.0 s</span>
+      <figure class="eye" id="eye-box" hidden>
+        <img id="eye" alt="Depth camera view: depth in grey, the object in pink">
+        <figcaption>What the arm sees · depth camera, object in pink</figcaption>
+      </figure>
     </div>
 
     <ol class="steps" aria-label="Episode progress">
@@ -186,6 +197,8 @@
         <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop</button>
       <button id="mic" aria-pressed="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>Voice</button>
+      <label class="toggle" title="The arm finds the object in a depth image instead of being told where it is (next episode)">
+        <input type="checkbox" id="cam">Depth camera</label>
     </div>
     <div class="status" id="status" role="status" aria-live="polite">Connecting…</div>
   </section>
@@ -198,7 +211,7 @@
         <div><div class="label">Result</div><div class="value" id="r-success">Waiting</div></div>
       </div>
       <div class="tile wide predict">
-        <div class="label">Where is it going? <span class="sub">TabPFN-3.5, from one look at detection · <span style="color:#ff4dbf">●</span> in the view</span></div>
+        <div class="label">Where is it going? <span class="sub">TabPFN-3.5, looks again every 0.2 s · <span style="color:#ff4dbf">●</span> in the view</span></div>
         <div class="value num" id="r-goal">–</div>
       </div>
       <div class="tile wide predict" id="hold-tile">
@@ -290,7 +303,8 @@ function showState(s) {
   $("r-voice").textContent = s.voice;
   $("r-goal").innerHTML = s.goal_err_cm != null
     ? `${s.goal_err_cm} cm <span class="sub">from the real stop point · look ${s.looks} · range ${s.goal_range_cm} cm` +
-      (s.arrive_in > 0 ? ` · arrives in ${s.arrive_in} s` : " · arrived") + "</span>"
+      (s.arrive_in > 0 ? ` · arrives in ${s.arrive_in} s` : " · arrived") +
+      (s.seen_err_cm != null ? ` · camera sees it within ${s.seen_err_cm} cm` : "") + "</span>"
     : `– <span class="sub">${s.traj_model === "ready" ? "waiting for detection" : "model " + s.traj_model}</span>`;
   const p = s.hold_p;
   $("hold-fill").style.width = p == null ? "0" : `${(p * 100).toFixed(0)}%`;
@@ -306,6 +320,8 @@ function showState(s) {
   $("p-tab").textContent = s.tabpfn;
   $("p-tab-dot").className = "dot " + (s.tabpfn === "ready" ? "ok" : s.tabpfn === "loading" ? "warn" : "bad");
   $("r-time").textContent = `${s.t.toFixed(1)} s`;
+  $("eye-box").hidden = !s.camera;
+  if (s.eye) $("eye").src = s.eye;
 
   step("st-ready", s.voice !== "idle");
   step("st-detect", s.detected);
@@ -321,7 +337,7 @@ function send(cmd) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(cmd);
   document.querySelectorAll("[data-cmd]").forEach(b => b.setAttribute("aria-pressed", b.dataset.cmd === cmd));
 }
-$("start").onclick = () => { send("start"); document.querySelectorAll("[data-cmd]").forEach(b => b.setAttribute("aria-pressed", false)); };
+$("start").onclick = () => { send($("cam").checked ? "start camera" : "start"); document.querySelectorAll("[data-cmd]").forEach(b => b.setAttribute("aria-pressed", false)); };
 document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => send(b.dataset.cmd));
 
 // ---------- voice (Chrome / Edge speech recognition; buttons stay as the fallback)

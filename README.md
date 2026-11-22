@@ -93,7 +93,7 @@ TabPFN downloads its model weights on first use and may ask you to accept its li
 python -m uvicorn server:app --port 8000
 ```
 
-Open http://localhost:8000, press **New episode**, then **Ready** (or 🎤 Voice and say “ready”). Start it about a minute before a demo: the three TabPFN models load in the background (the header shows “TabPFN ready”). The page works offline. If the live demo fails, `demo_replays/` has five recorded episodes.
+Open http://localhost:8000, press **New episode**, then **Ready** (or 🎤 Voice and say “ready”). Start it about a minute before a demo: the three TabPFN models load in the background (the header shows “TabPFN ready”). The page works offline. Tick **Depth camera** before **New episode** to let the arm find the object in a depth image; a picture-in-picture shows what it sees (object in pink). If the live demo fails, `demo_replays/` has five recorded episodes.
 
 **Self-checks**
 
@@ -157,6 +157,7 @@ python record_demo.py --n 5 --rl
 | `server.py`, `index.html`, `static/` | Web app (FastAPI + one page, Chart.js served locally) |
 | `record_demo.py` | Records MP4 replays with the predicted-stop marker |
 | `make_pitch_video.py` | Renders the pitch video `demo_replays/pitch_demo.mp4` (needs ffmpeg) |
+| `docs/TECHNICAL.md` | Technical documentation: architecture, models, evaluation protocol, problems and fixes |
 | `docs/VIDEO_SCRIPT.md`, `make_broll.py`, `make_final_video.py` | The 3-minute submission video: timed script, 2:20 of footage, and the tool that stitches in the team's camera clips and voice-over |
 | `make_pictures.py` | Renders the README pictures in `docs/images/` |
 | `regrasp_eval.py` | Measures the re-grasp reflex: the same episodes with it off and on |
@@ -167,7 +168,7 @@ python record_demo.py --n 5 --rl
 ## Limitations
 
 - The hand-over is scripted: the person is a visual figure whose hand follows a generated arc, and lets go once the hand has closed.
-- With `--camera`, detection and TabPFN's inputs come from the depth camera; the agent's close-range view of the object (relative position in its observation), the shape features and contact sensing still come from the simulator. The web app and videos run without the camera.
+- With `--camera`, detection and TabPFN's inputs come from the depth camera; the agent's close-range view of the object (relative position in its observation), the shape features and contact sensing still come from the simulator. The web app has a camera switch; the recorded videos run without the camera. Fine-tuning the agent on the camera's errors made it worse (77%), so the camera numbers use the original agent.
 - The 7-joint arm’s elbow sometimes swings out sideways.
 - The live view runs at about 0.7× real time on a laptop CPU, because the arm waits for each TabPFN look (shadows are off in the live stream; recorded videos keep them).
 - “Held” means the object is in finger contact and within 10 cm of the grasp point; the cup is the hardest object (about 75–80%).

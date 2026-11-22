@@ -5,17 +5,21 @@ Web app backend (spec section 9, minimum version): FastAPI + one WebSocket.
 
 - POST /upload   CSV dataset (per-step or per-episode file) -> column check + statistics
 - WS   /ws/sim   live episode: JPEG frames from MuJoCo's "demo" camera + JSON state;
-                 the browser sends "start" / "ready" / "release" / "stop"
+                 the browser sends "start" (or "start camera": the arm sees the object with its depth
+                 camera, sim/camera.py, and the state carries the camera's picture) / "ready" / "release" / "stop"
 The arm is driven by the trained agent (models/ppo_arm.zip), or by the scripted controller
 when started with ARM_CONTROLLER=scripted or when the model file is missing. The identified object comes from TabPFN-3.5 (falls back to the rule).
 """
 
 import asyncio
+import base64
 import io
 import json
 import math
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import time
 
 import mujoco
@@ -68,13 +72,15 @@ def _load_grasp():
 threading.Thread(target=_load_grasp, daemon=True).start()
 
 # "Where it's going": stop point predicted at detection (trajectory.py); the agent uses it
-traj = {"predict": None, "status": "loading"}
+traj = {"predict": None, "predict_cam": None, "status": "loading"}
 
 
 def _load_traj():
     try:
-        from trajectory import load_predictor
+        from trajectory import CAMERA_DATA, load_predictor
         traj["predict"], traj["status"] = load_predictor(), "ready"
+        if os.path.exists(CAMERA_DATA):  # camera mode: TabPFN learned from rows seen by the camera
+            traj["predict_cam"] = load_predictor(CAMERA_DATA)
     except Exception as e:  # without it the agent falls back to the simulator's true stop point
         traj["status"] = f"unavailable ({type(e).__name__})"
 
@@ -135,15 +141,17 @@ async def upload(file: UploadFile):
 async def sim_socket(ws: WebSocket):
     await ws.accept()
     policy_name, policy = load_policy()
-    env = ArmEnv()
-    renderer = mujoco.Renderer(env.m, 480, 640)
-    cmd = {"voice": "idle", "start": False}
+    sims = {}  # camera on/off -> (env, renderer), made on first use
+    # one thread owns the simulation: the depth camera's OpenGL context only works on the thread that made it
+    pool = ThreadPoolExecutor(1)
+    sim = lambda f, *a, **kw: asyncio.get_running_loop().run_in_executor(pool, partial(f, *a, **kw))
+    cmd = {"voice": "idle", "start": False, "camera": False}
 
     async def receive():
         while True:
             msg = (await ws.receive_text()).strip().lower()
-            if msg == "start":
-                cmd["start"] = True
+            if msg.startswith("start"):
+                cmd["start"], cmd["camera"] = True, msg == "start camera"
             elif msg in ("ready", "release", "stop"):
                 cmd["voice"] = msg
 
@@ -154,18 +162,26 @@ async def sim_socket(ws: WebSocket):
             while not cmd["start"]:
                 await asyncio.sleep(0.05)
             cmd.update(start=False, voice="idle")
-            await run_live_episode(ws, env, renderer, policy, policy_name, cmd)
+            if cmd["camera"] not in sims:
+                env = await sim(ArmEnv, camera=cmd["camera"])
+                sims[cmd["camera"]] = env, mujoco.Renderer(env.m, 480, 640)
+            await run_live_episode(ws, *sims[cmd["camera"]], policy, policy_name, cmd, sim)
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
         receiver.cancel()
-        renderer.close()
+        for env, renderer in sims.values():
+            renderer.close()
+            if env.eye:
+                pool.submit(env.eye.close)
+        pool.shutdown(wait=False)
 
 
-async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
-    env.goal_predictor = traj["predict"]  # ~0.1 s per look, waited for: a stale answer misled the agent
+async def run_live_episode(ws, env, renderer, policy, policy_name, cmd, sim):
+    # ~0.1 s per look, waited for: a stale answer misled the agent. Camera: the model learned from camera views
+    env.goal_predictor = (traj["predict_cam"] or traj["predict"]) if env.eye else traj["predict"]
     env.hold_predictor = grasp["clf"]  # the env asks at first touch and re-grasps if TabPFN says it is risky
-    obs, _ = env.reset(seed=time.time_ns() % 2**31, options={"live": True})  # ns: two episodes in one second differ
+    obs, _ = await sim(env.reset, seed=time.time_ns() % 2**31, options={"live": True})  # ns: two episodes in one second differ
     marker = env.m.site("goal_pred").id
     env.m.site_pos[marker] = [0, 0, -5]  # hidden until TabPFN has predicted
     ident = {"name": None}
@@ -190,7 +206,7 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             t_release = t_release or k / FPS
         else:
             action = policy(env, obs)
-        obs, _, terminated, _, info = await asyncio.to_thread(env.step, action)  # TabPFN may take 0.1 s: keep the socket alive
+        obs, _, terminated, _, info = await sim(env.step, action)  # TabPFN may take 0.1 s: keep the socket alive
         if not env.weld_on:  # the hand's own grip, after the person lets go (their push at hand-over peaks 300-500 N)
             max_force = max(max_force, env.total_f)
         if env.G_range is not None:
@@ -203,6 +219,11 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
         buf = io.BytesIO()
         Image.fromarray(renderer.render()).save(buf, format="JPEG", quality=75)
         await ws.send_bytes(buf.getvalue())
+        eye = None
+        if env.eye and k % 2 == 0 and (pic := env.eye.picture()) is not None:  # every other frame: half the bytes
+            b = io.BytesIO()
+            Image.fromarray(pic).save(b, format="JPEG", quality=80)
+            eye = "data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode()
         await ws.send_text(json.dumps({
             "t": round(k / FPS, 2), "voice": voice, "controller": policy_name,
             "object": env.obj if env.detected else None,
@@ -223,7 +244,9 @@ async def run_live_episode(ws, env, renderer, policy, policy_name, cmd):
             "goal_range_cm": None if env.G_range is None else round(100 * (env.G_range[1] - env.G_range[0]), 1),
             "arrive_in": None if env.G_range is None or env.t_carrier0 is None
             else round(max(0.0, env.travel_time - (env.k * env.dt - env.t_carrier0)), 1),
-            "traj_model": traj["status"],
+            "traj_model": traj["status"], "camera": env.eye is not None, "eye": eye,
+            "seen_err_cm": None if not env.eye or env.seen is None or not env.weld_on or env.t_touch is not None
+            else round(100 * float(np.linalg.norm(env.seen[0] - env.opos)), 1),
         }))
         if t_release is not None and k / FPS - t_release > 1.0:
             break
